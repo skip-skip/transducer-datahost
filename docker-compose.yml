@@ -1,0 +1,78 @@
+# ---------------------------------------------------------------------------
+# SKELETON ONLY
+#
+# Only the `db` service is defined. The `api` and `ingest` services are
+# intentionally commented out until their Dockerfiles and application code
+# exist. This file is not yet a complete, runnable stack.
+#
+# Validate later with:  docker compose config
+# ---------------------------------------------------------------------------
+name: transducer-dash
+
+services:
+  db:
+    image: postgres:16
+    container_name: transducer-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-transducer}
+      POSTGRES_USER: ${POSTGRES_USER:-transducer_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      TZ: ${SITE_TIMEZONE:-America/New_York}
+    ports:
+      # Bind to the internal interface in production; the skeleton publishes
+      # on all interfaces for local testing only.
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      # SQL files placed here run only when the data volume is first created.
+      - ./db/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-transducer_admin} -d ${POSTGRES_DB:-transducer}",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # api:
+  #   build: ./api
+  #   container_name: transducer-api
+  #   restart: unless-stopped
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     PGHOST: db
+  #     PGPORT: 5432
+  #     PGDATABASE: ${POSTGRES_DB:-transducer}
+  #     PGUSER: ${READ_USER:-transducer_read}
+  #     PGPASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
+  #     SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
+  #     API_CORS_ORIGINS: ${API_CORS_ORIGINS:-}
+  #   ports:
+  #     - "${API_PORT:-8000}:8000"
+
+  # ingest:
+  #   build: ./ingest
+  #   container_name: transducer-ingest
+  #   profiles: ["ingest"]
+  #   depends_on:
+  #     db:
+  #       condition: service_healthy
+  #   environment:
+  #     PGHOST: db
+  #     PGPORT: 5432
+  #     PGDATABASE: ${POSTGRES_DB:-transducer}
+  #     PGUSER: ${INGEST_USER:-transducer_ingest}
+  #     PGPASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
+  #     SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
+  #   volumes:
+  #     # Mount a synced copy of the export folder read-only.
+  #     - ./data:/data:ro
+  #   command: ["python", "-m", "transducer_ingest.cli", "ingest", "--source", "/data"]
+
+volumes:
+  pgdata:

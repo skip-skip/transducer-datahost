@@ -1,0 +1,37 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Source exports (large, site data; never commit)
+OneDrive_*/
+OneDrive_*.zip
+data/
+*.zip
+
+# Keep small parser test fixtures if they are added later
+!ingest/tests/fixtures/**/*.xle
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+dist/
+build/
+
+# Database dumps and local volumes
+*.dump
+*.sql.gz
+pgdata/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
