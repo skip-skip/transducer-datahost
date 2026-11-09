@@ -49,8 +49,9 @@ embedded PostgreSQL 16.2; Docker/Compose verification on the Linux VM is pending
 - Preserves `ms` precision.
 - Detects compensated files by the `<Compensation_info>` metadata block with zero false
   positives; filenames are only a consistency check.
-- Reproduces the expected totals: 101 uncompensated files, 173,508 rows, 113,177 unique
-  readings.
+- Reproduces the expected totals: 101 uncompensated files, 173,508 log records, 113,177
+  unique samples, 233,855 series readings, 1 empty file, 13 anomalies, 31 fully redundant
+  files.
 
 ## Phase 3 — Loader and deduplication
 
@@ -65,7 +66,7 @@ embedded PostgreSQL 16.2; Docker/Compose verification on the Linux VM is pending
 - Dry run writes nothing and reports expected counts.
 - Full backfill inserts 113,177 unique readings and 0 compensated rows.
 - Re-running inserts 0 rows.
-- 34 fully redundant files contribute zero new readings; 13 warning files recorded; 1 empty file recorded.
+- 31 fully redundant files contribute zero new readings; 13 anomalous files recorded; 1 empty file recorded.
 - A failed file rolls back without affecting other files.
 
 ## Phase 4 — Infrastructure and network access
@@ -136,8 +137,8 @@ embedded PostgreSQL 16.2; Docker/Compose verification on the Linux VM is pending
 | Uncompensated files recorded | 101 |
 | Unique readings | 113,177 |
 | Compensated rows | 0 |
-| Fully redundant files (zero new readings) | 34 |
-| Warning files | 13 |
+| Fully redundant files (zero new readings) | 31 |
+| Anomalous files | 13 |
 | Empty files | 1 |
 | Re-run inserts | 0 |
 | Read role write attempts | Denied |

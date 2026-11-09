@@ -68,7 +68,7 @@ metadata block. Filenames also contain `Compensated`, but naming is a convention
 guarantee.
 
 **Decision:** v1 ingests only uncompensated files, detected by the presence of the
-`<Compensation_info>` metadata block in the file body. The filename `compensat` substring
+`<Compensation_info>` metadata block in the file body. The filename `Compensated` token
 is used only as a consistency check and never to include or exclude a file. If the filename
 and metadata disagree, metadata wins and the discrepancy is recorded.
 
@@ -234,3 +234,72 @@ views owned by the admin role. Grant `transducer_read` `SELECT` on the views and
 - `v_import` exposes `error` details without granting table access.
 - Views run with owner privileges, so their definitions must stay under review and be
   re-granted deliberately when columns are added.
+
+---
+
+## ADR-013: Decode .xle files as UTF-8 first, cp1252 fallback
+
+**Status:** Accepted (Phase 2)
+
+**Context:** The current export is UTF-8 without a BOM, while older files and the committed
+test fixtures use Windows-1252. cp1252 accepts every byte sequence, so trying it first
+silently mis-decodes UTF-8 files: the UTF-8 bytes `c2 b0` for `°` become `Â°`. This made
+every channel unit appear unknown and inflated the anomaly count.
+
+**Decision:** Honor a UTF-8 BOM when present; otherwise attempt UTF-8 first and fall back to
+cp1252 only when UTF-8 decoding fails. Strip the XML declaration before parsing because it
+names an encoding that no longer matches the decoded string.
+
+**Consequences:**
+
+- Both the current UTF-8 export and older cp1252 files parse with correct units.
+- A cp1252 file whose bytes happen to form valid UTF-8 could be mis-decoded, but no such
+  file exists in the export and the risk is accepted.
+- Unknown units are still imported with a warning rather than rejected.
+
+---
+
+## ADR-014: Report metrics and redundancy ordering
+
+**Status:** Accepted (Phase 2)
+
+**Context:** "Rows", "readings", and "samples" were used loosely, and the documented
+redundant-file count (34) did not match the implementation.
+
+**Decision:** Define the report metrics explicitly:
+
+- **Log records:** count of `<Log>` entries, including the raw `<Log` count from malformed
+  files (1,820 for the corrupt `_jh` copy).
+- **Unique samples:** distinct `(serial, ts)` pairs.
+- **Series readings:** distinct `(serial, channel, ts)` triples, which become Phase 3
+  `reading` rows.
+
+Files are ordered by `download_time` then filename, and a file is fully redundant when all
+of its `(serial, channel, ts)` keys were already seen in earlier files. Location-only
+mismatches are reported separately and are not counted as anomalies.
+
+**Consequences:**
+
+- The current export reconciles exactly: 173,508 log records, 113,177 unique samples,
+  233,855 series readings, 13 anomalies, 31 fully redundant files, 1 empty file.
+- The malformed file's raw logs are still accounted for even though it contributes no rows.
+- Metric definitions are stable for Phase 3 acceptance tests.
+
+---
+
+## ADR-015: Database-free parser report
+
+**Status:** Accepted (Phase 2)
+
+**Context:** Parsing and validation need to be verified before PostgreSQL is available, and
+the report must not depend on the loader.
+
+**Decision:** Provide `python -m transducer_ingest.report` with `--source`, `--json`,
+`--check`, and `--all`. It imports only `parse_xle` and `validate`; no database driver is
+imported. `--check` exits non-zero when the measured totals differ from the expected export.
+
+**Consequences:**
+
+- Parsing can be tested on the ingest host before the VM is reachable.
+- The same `validate.py` aggregation will feed the Phase 3 dry-run report.
+- A test asserts that importing the report module does not import `psycopg`.

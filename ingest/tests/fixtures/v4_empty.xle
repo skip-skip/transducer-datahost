@@ -1,0 +1,48 @@
+<?xml version="1.0" ?>
+<Body_xle>
+    <File_info>
+        <Company></Company>
+        <LICENCE></LICENCE>
+        <Date>2025/09/30</Date>
+        <Time>12:16:36</Time>
+        <FileName></FileName>
+        <Created_by>Version 4.7.0</Created_by>
+        <Downloaded_by>Version 4.7.0</Downloaded_by>
+        <Program_by>PC Software 4.6.2</Program_by>
+        <Interface>Field Reader (597068)</Interface>
+    </File_info>
+    <Instrument_info>
+        <Instrument_type>L5_LT</Instrument_type>
+        <Model_number>M10</Model_number>
+        <Instrument_state>Stopped</Instrument_state>
+        <Serial_number>2201818</Serial_number>
+        <Battery_voltage>3.53700</Battery_voltage>
+        <Battery_charge>1468.39</Battery_charge>
+        <Channel>2</Channel>
+        <Firmware>1.006</Firmware>
+    </Instrument_info>
+    <Instrument_info_data_header>
+        <Project_ID>TEST-001</Project_ID>
+        <Location>MCMW-03_AT</Location>
+        <Latitude>0.000</Latitude>
+        <Longtitude>0.000</Longtitude>
+        <Sample_rate>100</Sample_rate>
+        <Sample_mode>0</Sample_mode>
+        <!--Linear-->
+        <Memory_mode>Slate</Memory_mode>
+        <Start_time>2025/09/01 00:00:00</Start_time>
+        <Stop_time>2025/09/30 00:00:00</Stop_time>
+        <Num_log>0</Num_log>
+    </Instrument_info_data_header>
+    <Ch1_data_header>
+        <Identification>LEVEL</Identification>
+        <Unit>ft</Unit>
+        <Parameters />
+    </Ch1_data_header>
+    <Ch2_data_header>
+        <Identification>TEMPERATURE</Identification>
+        <Unit>°C</Unit>
+        <Parameters />
+    </Ch2_data_header>
+    <Data />
+</Body_xle>

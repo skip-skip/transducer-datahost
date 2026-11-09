@@ -1,4 +1,3 @@
-"""Transducer export ingestion package (skeleton).
+"""Parse Solinst .xle exports and report validation results without a database."""
 
-Implementation is intentionally deferred. See ../../docs/ingestion.md for the design.
-"""
+__version__ = "0.1.0"

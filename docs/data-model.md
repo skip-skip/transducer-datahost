@@ -173,9 +173,9 @@ The views are owned by the admin role, so the read role does not need direct acc
 | Measure | Value |
 |---|---|
 | Uncompensated files | 101 |
-| Parsed rows across files | 173,508 |
-| Unique readings | 113,177 |
-| Estimated `reading` rows (3 channels) | ~250k–340k |
+| Log records across files | 173,508 |
+| Unique samples `(serial, ts)` | 113,177 |
+| Series readings `(serial, channel, ts)` | 233,855 |
 | Estimated database size | Well under 100 MB |
 
 ## 7. Example queries (illustrative)

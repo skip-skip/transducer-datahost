@@ -131,16 +131,18 @@ A BRIN index on `ts` is sufficient. TimescaleDB can be added later without schem
 | Attribute | Observation |
 |---|---|
 | File count | 147 `.xle` files: 101 uncompensated, 46 compensated |
-| Format | XML (`<Body_xle>`), no namespace, Windows-1252 encoding |
+| Format | XML (`<Body_xle>`), no namespace, UTF-8 (current export; cp1252 fallback) |
 | Generations | `DataGrabber V3.001` (compact XML) and `Version 4.7.0` (indented, extra fields) |
 | Channels | `LEVEL`, `TEMPERATURE`, optional `CONDUCTIVITY`; barometers report level in kPa |
 | Long-term interval | 4 hours |
 | Aquifer-test (`_AT_`) interval | 2 Hz (`ms` = 0 / 500) |
 | Uncompensated rows | 173,508 |
 | Unique rows `(serial, timestamp, ms)` | 113,177 |
-| Fully redundant files | 34 |
-| Anomalous files | 13 files with header/data anomalies (12 `Stop_time < Start_time`, one of which also has zero logs; 1 `Num_log` mismatch) |
-| Compensated marker | `<Compensation_info>` metadata block in the body (authoritative); filename `compensat` is a consistency check only |
+| Series readings `(serial, channel, timestamp, ms)` | 233,855 |
+| Fully redundant files | 31 (ordered by `download_time`, then filename) |
+| Anomalous files | 13 files with header/data anomalies (12 `Stop_time < Start_time`, one of which also has zero logs; 1 malformed XML file) |
+| Location mismatches | 2 files (reported separately from anomalies) |
+| Compensated marker | `<Compensation_info>` metadata block in the body (authoritative); filename `Compensated` is a consistency check only |
 
 ## 9. Design principles
 

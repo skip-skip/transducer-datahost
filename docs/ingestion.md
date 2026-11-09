@@ -5,14 +5,14 @@
 | Attribute | Value |
 |---|---|
 | File type | Solinst `.xle` XML (`<Body_xle>`) |
-| Encoding | Windows-1252 (`°C`, `µS/cm`); numeric values are ASCII |
+| Encoding | UTF-8 without BOM (current export); Windows-1252 fallback for older files; `°C`, `µS/cm`; numeric values are ASCII |
 | Namespace | None |
 | Generations | `DataGrabber V3.001` (compact) and `Version 4.7.0` (indented, extra fields) |
 | Channel metadata | `<ChN_data_header>` with `<Identification>` and `<Unit>` |
 | Data records | `<Log id="N">` with `<Date>`, `<Time>`, `<ms>`, `<ch1>`, `<ch2>`, optional `<ch3>` |
 | Long-term interval | 4 hours |
 | Aquifer-test interval | 2 Hz (`ms` 0 / 500) |
-| Compensation marker | `<Compensation_info>` metadata block in the body (authoritative); filename `compensat` is advisory |
+| Compensation marker | `<Compensation_info>` metadata block in the body (authoritative); filename `Compensated` token is advisory |
 
 The parser must not assume indentation, field presence, channel count, or a fixed interval.
 
@@ -39,10 +39,10 @@ Detection uses file contents, not the filename:
 is_compensated = body contains <Compensation_info>
 ```
 
-The filename substring `compensat` (case-insensitive) is used only as a consistency check
-and is never used to include or exclude a file. In the current export the two signals agree
-on all 147 files: 46 have both, 101 have neither. If they ever disagree, metadata wins and
-the discrepancy is recorded in `import_file.error`.
+The filename token `Compensated` (case-insensitive, and not the `uncompensated` prefix) is
+used only as a consistency check and is never used to include or exclude a file. In the
+current export the two signals agree on all 147 files: 46 have both, 101 have neither. If
+they ever disagree, metadata wins and the discrepancy is recorded in `import_file.error`.
 
 Why not use the numeric values? Compensated `ch1` is the compensated result and is often
 near zero or slightly negative, but 36 of 46 compensated files contain no negative value,
@@ -53,7 +53,9 @@ or `Version 4.7.0`, and 20 uncompensated files also use `Version 4.7.0`.
 
 ## 3. Parse steps
 
-1. Read bytes; decode as Windows-1252 with a UTF-8 fallback for future exports.
+1. Read bytes; decode as UTF-8, falling back to Windows-1252 for older exports. UTF-8 is
+   tried first because cp1252 accepts every byte sequence and would silently mis-decode a
+   UTF-8 file.
 2. Parse XML with a hardened parser (`defusedxml`); reject malformed documents.
 3. Extract file metadata: `<File_info>` date/time, creator/version.
 4. Extract instrument metadata: serial, type, model, firmware, project, channel count.
@@ -94,7 +96,8 @@ itself cannot be read.
 
 - `sha256` is unique in `import_file`. Exact copies (`- Copy`, `(2)`, `(3)`, `_jh`,
   `REFERENCE BARO_` prefix) are skipped after the first import.
-- 34 of the 101 uncompensated files are fully redundant in the current export.
+- 31 of the 101 uncompensated files are fully redundant in the current export when files are
+  ordered by `download_time` then filename.
 
 ### Row level
 
@@ -163,8 +166,8 @@ Expected current-export results:
 | Metric | Expected |
 |---|---|
 | Eligible uncompensated files | 101 |
-| Fully redundant files | 34 |
-| Anomalous files | 13 |
+| Fully redundant files | 31 |
+| Anomalous files | 13 (12 `Stop_time < Start_time`, one of which is empty; 1 malformed XML) |
 | Empty files | 1 |
 | Unique readings | 113,177 |
 | Compensated rows | 0 |
@@ -194,17 +197,24 @@ Expected current-export results:
 2. Run `ingest` for the full export.
 3. Verify `import_file` counts by status and `reading` count.
 4. Re-run `ingest`; confirm zero new rows.
-5. Review the 13 warning files and the location mismatches.
+5. Review the 13 anomalous files and the 2 location mismatches.
 
-## 12. Planned CLI contract
+## 12. CLI contract
+
+Phase 2 implements the database-free report:
+
+```
+python -m transducer_ingest.report --source <folder> [--json] [--check] [--all]
+```
+
+Phase 3 adds the database loader:
 
 ```
 python -m transducer_ingest.cli ingest --source <folder> [--dry-run] [--since <date>]
-python -m transducer_ingest.cli report [--source <folder>]
 ```
 
 Configuration comes from environment variables (`PGHOST`, `PGPORT`, `PGDATABASE`,
 `PGUSER`, `PGPASSWORD`, `SITE_TIMEZONE`, `INGEST_SETTLE_SECONDS`). Passwords are never
 accepted as command-line arguments in scheduled runs.
 
-This contract is a design target; the CLI is not implemented yet.
+The ingest command is a design target for Phase 3; the report command is implemented.

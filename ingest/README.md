@@ -1,30 +1,64 @@
 # Ingester
 
-The ingestion package is **not implemented yet**. This directory will contain the Python
-code that parses `.xle` exports and loads uncompensated readings into PostgreSQL.
+The ingestion package parses Solinst `.xle` exports and reports validation results without a
+database. Database loading is added in Phase 3.
 
-## Planned layout
+## Layout
 
 ```
 ingest/
   pyproject.toml
   transducer_ingest/
-    cli.py          # ingest / --dry-run / report
+    __init__.py
     parse_xle.py    # XML -> normalized records
-    validate.py     # anomaly classification
-    load.py         # staging COPY + upsert
-    db.py           # connections and transactions
+    validate.py     # statuses, anomaly classification, folder report
+    report.py       # database-free report CLI
   tests/
-    fixtures/       # small sample .xle files
+    fixtures/       # small cp1252 and UTF-8 sample .xle files
+    conftest.py
     test_parse.py
+    test_validate.py
+    test_report.py
 ```
 
-## Planned commands
+## Install
 
 ```
-python -m transducer_ingest.cli ingest --source <folder> [--dry-run] [--since <date>]
-python -m transducer_ingest.cli report [--source <folder>]
+cd ingest
+python -m pip install -e ".[dev]"
 ```
+
+## Commands
+
+```
+python -m transducer_ingest.report --source <folder> [--json] [--check] [--all]
+```
+
+`--source` is scanned recursively for `.xle` files. `--check` exits non-zero when the
+aggregate totals differ from the expected current export. The command never imports a
+database driver.
+
+Expected current-export totals (measured against `OneDrive_1_11-9-2026`):
+
+| Metric | Expected |
+|---|---|
+| Compensated files | 46 |
+| Uncompensated files | 101 |
+| Log records | 173,508 |
+| Unique samples `(serial, ts)` | 113,177 |
+| Series readings `(serial, channel, ts)` | 233,855 |
+| Empty files | 1 |
+| Anomalous files | 13 |
+| Fully redundant files | 31 |
+
+## Tests
+
+```
+python -m pytest -q
+```
+
+The full-export test is marked `integration` and is skipped automatically when
+`OneDrive_1_11-9-2026/` is not present.
 
 ## Design reference
 
