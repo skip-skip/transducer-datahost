@@ -8,6 +8,10 @@ logger exports, and a read-only interface for internal dashboards and analysts.
 The source of truth remains the OneDrive export folder. The database is a derived,
 queryable copy with provenance back to the originating `.xle` file.
 
+**Current status:** Phase 1 (schema, roles, views, and grants) is implemented in
+`db/init` and verified against PostgreSQL 16.2. Docker/Compose verification on the Linux
+VM is pending. See [docs/roadmap.md](roadmap.md).
+
 ## 2. Scope
 
 ### In scope (v1)
@@ -75,10 +79,12 @@ queryable copy with provenance back to the originating `.xle` file.
 1. A new `.xle` export lands in the OneDrive folder.
 2. The scheduled ingester scans for files that are complete and not yet imported.
 3. Each file is parsed into logger metadata, channel metadata, and timestamped readings.
-4. Validation classifies the file as imported, warning, empty, or error.
-5. Readings are staged and upserted into `transducer.reading`, keyed by
-   `(series_id, ts)`. Overlapping downloads are resolved in favor of the newest download.
-6. The file and its outcome are recorded in `transducer.import_file`.
+4. Validation classifies the file as imported, warning, empty, error, or
+   skipped_compensated (compensated files are audited but contribute no readings).
+5. The `import_file` audit row is inserted first, then readings are staged and upserted
+   into `transducer.reading`, keyed by `(series_id, ts)`. Overlapping downloads are
+   resolved in favor of the newest download.
+6. The file's final parsed count and status are recorded in `transducer.import_file`.
 7. Consumers read through the API or the read-only Postgres role.
 
 ## 6. Deployment topology
@@ -86,7 +92,8 @@ queryable copy with provenance back to the originating `.xle` file.
 ### Linux VM
 
 - Docker Engine + Compose.
-- `db` container: PostgreSQL 16 with a named volume and `db/init` scripts.
+- `db` container: PostgreSQL 16 with a named volume; `db/init` creates the schema,
+  roles, views, and grants on first start. Authentication is SCRAM-only.
 - `api` container: FastAPI, read-only DB role.
 - Firewall exposes 5432 and 8000 only to the internal subnet.
 - Nightly `pg_dump` to a network share.

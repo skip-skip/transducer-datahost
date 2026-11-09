@@ -38,21 +38,25 @@ ports on the internal interface rather than `0.0.0.0` where possible.
 | Role | Capabilities | Used by |
 |---|---|---|
 | `transducer_admin` | Owner; DDL and maintenance | Provisioning only |
-| `transducer_ingest` | `INSERT`/`UPDATE`/`SELECT` on ingest tables; no DDL | Ingester |
-| `transducer_read` | `SELECT` on schema/views only; no writes | API and analysts |
+| `transducer_ingest` | `SELECT`/`INSERT`/`UPDATE` on the five base tables and `USAGE`/`SELECT` on sequences; no `DELETE`, `TRUNCATE`, or DDL | Ingester |
+| `transducer_read` | `SELECT` on `logger`, `location`, `series`, `reading`, and the three read views; no direct `import_file` access, no sequences, no writes | API and analysts |
 
 Rules:
 
 - Application roles never own objects.
-- `transducer_read` has no access to `import_file.error` internals unless exposed via a view
-  (optional).
+- `transducer_read` has no direct access to `import_file`; the curated `v_import` view
+  exposes the audit fields, including `error`.
 - Passwords are generated, stored in the secret store / `.env` on the host, and rotated.
 - No shared superuser credentials in application config.
 
 ## 4. Authentication
 
-- `password_encryption = scram-sha-256`.
-- `pg_hba.conf` entries scoped by database, role, and source subnet, for example:
+- `password_encryption = scram-sha-256`; both application roles are created with SCRAM
+  passwords by `db/init/01_roles.sql`.
+- Compose sets `POSTGRES_HOST_AUTH_METHOD=scram-sha-256` and initializes with
+  `--auth-host=scram-sha-256 --auth-local=scram-sha-256`, so the generated `pg_hba.conf`
+  contains no `trust` entries.
+- `pg_hba.conf` entries are scoped by database, role, and source subnet, for example:
 
 ```
 # TYPE  DATABASE     USER                ADDRESS           METHOD

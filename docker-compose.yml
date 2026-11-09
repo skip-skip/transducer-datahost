@@ -1,11 +1,8 @@
 # ---------------------------------------------------------------------------
-# SKELETON ONLY
+# The `db` service is runnable. The `api` and `ingest` services remain
+# commented out until their Dockerfiles and application code exist.
 #
-# Only the `db` service is defined. The `api` and `ingest` services are
-# intentionally commented out until their Dockerfiles and application code
-# exist. This file is not yet a complete, runnable stack.
-#
-# Validate later with:  docker compose config
+# Validate with:  docker compose config
 # ---------------------------------------------------------------------------
 name: transducer-dash
 
@@ -18,20 +15,29 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-transducer}
       POSTGRES_USER: ${POSTGRES_USER:-transducer_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      # The init scripts create these roles and fail fast if either password
+      # is missing. They are only read on the first initialization.
+      INGEST_PASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
+      READ_PASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
+      # No trust entries: host and local connections both use SCRAM.
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+      POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
       TZ: ${SITE_TIMEZONE:-America/New_York}
     ports:
-      # Bind to the internal interface in production; the skeleton publishes
-      # on all interfaces for local testing only.
+      # Bind to the internal interface in production; this file publishes on
+      # all interfaces for local testing only.
       - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # SQL files placed here run only when the data volume is first created.
       - ./db/init:/docker-entrypoint-initdb.d:ro
     healthcheck:
+      # Use TCP so the socket-only temporary server used during initialization
+      # is not mistaken for a ready database.
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-transducer_admin} -d ${POSTGRES_DB:-transducer}",
+          "pg_isready -h 127.0.0.1 -U $$POSTGRES_USER -d $$POSTGRES_DB",
         ]
       interval: 10s
       timeout: 5s

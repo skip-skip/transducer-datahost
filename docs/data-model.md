@@ -67,7 +67,7 @@
 | `channel_no` | `smallint` | 1, 2, 3 |
 | `identification` | `text` | `LEVEL`, `TEMPERATURE`, `CONDUCTIVITY` |
 | `unit` | `text` | `m`, `°C`, `µS/cm`, `kPa` |
-| `data_kind` | `text` | `uncompensated` (v1); future `compensated` |
+| `data_kind` | `text` | `uncompensated` or `compensated`; only uncompensated series are loaded in v1 |
 
 Unique key: `(serial_number, channel_no, identification, unit, data_kind)`.
 
@@ -78,18 +78,22 @@ Unique key: `(serial_number, channel_no, identification, unit, data_kind)`.
 | `file_id` | `bigint` identity PK | Monotonic processing order |
 | `filename` | `text` | Original filename |
 | `sha256` | `char(64)` UNIQUE | Content hash for exact-duplicate detection |
-| `download_time` | `timestamp` | `<File_info><Date> + <Time>`; ingest priority |
-| `serial_number` | `text` FK → `logger` | |
-| `location_id` | `integer` FK → `location` | From header |
-| `start_time` | `timestamp` | Header `<Start_time>` |
-| `stop_time` | `timestamp` | Header `<Stop_time>` |
+| `download_time` | `timestamp(3)` | `<File_info><Date> + <Time>`; ingest priority; falls back to the file mtime when the header is unreadable |
+| `serial_number` | `text` FK → `logger` | Nullable when the file cannot be parsed |
+| `location_id` | `integer` FK → `location` | From header; nullable when the file cannot be parsed |
+| `start_time` | `timestamp(3)` | Header `<Start_time>` |
+| `stop_time` | `timestamp(3)` | Header `<Stop_time>` |
 | `num_log` | `integer` | Header `<Num_log>` |
 | `parsed_log` | `integer` | Actual parsed `<Log>` count |
 | `is_compensated` | `boolean` | Presence of `<Compensation_info>` metadata (filename is advisory only) |
-| `data_kind` | `text` | `uncompensated` in v1 |
-| `status` | `text` | `imported`, `warning`, `empty`, `error`, `skipped_duplicate` |
+| `data_kind` | `text` | `uncompensated`, or `compensated` for skipped compensated files |
+| `status` | `text` | `imported`, `warning`, `empty`, `error`, `skipped_duplicate`, `skipped_compensated` |
 | `error` | `text` | Validation/parse detail |
 | `imported_at` | `timestamptz` | Default `now()` |
+
+`is_compensated` and `data_kind` are kept consistent by a check constraint:
+`is_compensated = (data_kind = 'compensated')`. A `skipped_compensated` row must have
+`parsed_log = 0` because no readings are loaded for it.
 
 ### `transducer.reading`
 
@@ -145,22 +149,24 @@ Compensated exports reuse the same serial and channels but carry different value
 |---|---|
 | `reading` PK `(series_id, ts)` | Range scans per series, dedup key |
 | `reading` BRIN on `ts` | Broad time-range filtering |
+| `reading` btree on `file_id` | Provenance joins and FK maintenance |
 | `import_file` UNIQUE on `sha256` | Exact-duplicate detection |
 | `import_file` on `(serial_number, download_time)` | Per-logger audit and priority |
+| `import_file` on `location_id` | Location joins and FK maintenance |
 | `series` UNIQUE on identity | Idempotent series creation |
 
 ## 5. Views
 
-Planned `transducer.v_reading` joins `reading` → `series` → `logger` → `import_file` →
-`location` and exposes friendly columns:
+The read role queries curated views instead of `import_file`:
 
-```
-serial_number, location, is_aquifer_test, data_kind,
-channel_no, identification, unit, ts, value,
-file_id, filename, download_time
-```
+| View | Purpose |
+|---|---|
+| `transducer.v_reading` | `reading` → `series` → `import_file` → `location`; exposes `series_id`, `serial_number`, `location_id`, `location`, `is_aquifer_test`, `timezone`, `data_kind`, `channel_no`, `identification`, `unit`, `ts`, `value`, `file_id`, `filename`, `download_time`. |
+| `transducer.v_reading_utc` | Everything in `v_reading` plus `ts_utc = ts AT TIME ZONE timezone`; local `ts` is retained for comparison. |
+| `transducer.v_import` | Audit view with `file_id`, `filename`, `sha256`, `download_time`, `serial_number`, `location_id`, `location`, `is_aquifer_test`, `start_time`, `stop_time`, `num_log`, `parsed_log`, `is_compensated`, `data_kind`, `status`, `error`, `imported_at`. |
 
-A future `transducer.v_reading_utc` can expose `ts AT TIME ZONE timezone AS ts_utc`.
+The views are owned by the admin role, so the read role does not need direct access to
+`import_file` (and does not have it).
 
 ## 6. Estimated volume
 
@@ -185,17 +191,14 @@ WHERE s.identification = 'LEVEL'
 ORDER BY s.serial_number, r.ts DESC;
 ```
 
-Readings for one logger over a window, in UTC:
+Readings for one logger over a window, in UTC (read role):
 
 ```sql
-SELECT r.ts AT TIME ZONE l.timezone AS ts_utc, s.identification, r.value, s.unit
-FROM transducer.reading r
-JOIN transducer.series s USING (series_id)
-JOIN transducer.import_file f USING (file_id)
-JOIN transducer.location l USING (location_id)
-WHERE s.serial_number = '1096042'
-  AND r.ts >= '2026-01-01' AND r.ts < '2026-02-01'
-ORDER BY r.ts;
+SELECT v.ts_utc, v.identification, v.value, v.unit
+FROM transducer.v_reading_utc v
+WHERE v.serial_number = '1096042'
+  AND v.ts >= '2026-01-01' AND v.ts < '2026-02-01'
+ORDER BY v.ts;
 ```
 
 ## 8. Compensated extension (future)

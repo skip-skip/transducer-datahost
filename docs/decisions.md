@@ -192,3 +192,45 @@ compensated series will reuse serial/channel identities.
 - Uniform handling of missing channels and unit differences.
 - Compensated series get distinct `series_id` values without key collisions.
 - Slightly more rows and joins; negligible at this volume.
+
+---
+
+## ADR-011: Initialize with ordered SQL scripts and defer migrations
+
+**Status:** Accepted (Phase 1)
+
+**Context:** The database is new and has no production data. The Postgres Docker image
+runs `/docker-entrypoint-initdb.d/*.sql` only when the data volume is empty. A migration
+tool adds process and dependencies before there is data worth preserving.
+
+**Decision:** Use four ordered init scripts (`01_roles.sql`, `02_schema.sql`,
+`03_views.sql`, `04_grants.sql`) for Phase 1. Re-initialize with
+`docker compose down -v` while the data is disposable. Adopt a versioned migration tool
+before loading production data or making a schema change that must preserve data.
+
+**Consequences:**
+
+- Simple, reproducible first boot with no migration bookkeeping.
+- `down -v` destroys the database; it is only acceptable before production data exists.
+- Future schema changes require a real migration path; this ADR will be superseded.
+
+---
+
+## ADR-012: Curated read views
+
+**Status:** Accepted
+
+**Context:** The read role needs friendly joins and audit/status information (including
+parse errors), but should not read `import_file` directly or depend on the base-table
+shape.
+
+**Decision:** Expose `v_reading`, `v_reading_utc`, and `v_import` as security-definer
+views owned by the admin role. Grant `transducer_read` `SELECT` on the views and on
+`logger`, `location`, `series`, and `reading`; deny direct `import_file` access.
+
+**Consequences:**
+
+- The read surface is explicit and stable; the API and analysts share it.
+- `v_import` exposes `error` details without granting table access.
+- Views run with owner privileges, so their definitions must stay under review and be
+  re-granted deliberately when columns are added.

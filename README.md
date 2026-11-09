@@ -3,10 +3,11 @@
 Centralized PostgreSQL store for uncompensated time-series transducer exports, with a
 read-only API for internal dashboards and analysts.
 
-> **Status: planning / skeleton.**
-> No application code, executable schema scripts, or runnable services exist yet.
-> This repository currently contains architecture documentation, configuration templates,
-> and an empty directory skeleton. See [docs/roadmap.md](docs/roadmap.md) for the build plan.
+> **Status: Phase 1 (schema and local database).**
+> The `transducer` schema, roles, read views, grants, and Phase 1 acceptance test are
+> implemented and verified against PostgreSQL 16.2. The parser, loader, and API are not
+> implemented yet, and Docker/Compose verification on the Linux VM is pending. See
+> [docs/roadmap.md](docs/roadmap.md) for the build plan.
 
 ## Why this exists
 
@@ -62,11 +63,12 @@ Out of scope for v1:
 | Path | Purpose | Status |
 |---|---|---|
 | `docs/` | Architecture, data model, ingestion, network/security, decisions, roadmap | Written |
-| `db/` | Schema, role, and view scripts (executed on first container start) | Placeholder |
+| `db/init/` | Ordered SQL that creates roles, schema, views, and grants on first start | Implemented |
+| `db/tests/` | Phase 1 acceptance checks | Implemented |
 | `ingest/` | Python package that parses `.xle` files and loads PostgreSQL | Placeholder |
 | `api/` | Read-only FastAPI service | Placeholder |
 | `scripts/` | Scheduled ingest, backup, and restore helpers | Placeholder |
-| `docker-compose.yml` | PostgreSQL service skeleton; API/ingest services commented out | Skeleton |
+| `docker-compose.yml` | Runnable `db` service; API/ingest services commented out | Partial |
 | `.env.example` | Environment template | Template |
 
 ## Documentation
@@ -93,5 +95,5 @@ check. The sibling `.zip` is the same content zipped and is also ignored.
 
 ## Next step
 
-Switch to the build agent to begin Phase 1 in [docs/roadmap.md](docs/roadmap.md):
-scaffold the schema, parser, loader, and tests.
+Verify `docker compose up -d db` on the Linux VM, then start Phase 2 (parser and
+validation) per [docs/roadmap.md](docs/roadmap.md).

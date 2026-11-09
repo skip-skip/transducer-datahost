@@ -121,10 +121,17 @@ overwrite newer data. A re-run of the same export inserts zero rows.
 1. Parse the file fully in memory (largest file is ~3.8 MB, so this is safe).
 2. Begin a transaction.
 3. Upsert `logger`, `location`, and `series`; collect their IDs.
-4. `COPY` normalized readings into a temporary staging table.
-5. `INSERT ... SELECT ... ON CONFLICT` from staging into `reading`.
-6. Insert/update the `import_file` row with counts and status.
-7. Commit. On any failure, roll back and record `status = error` in a separate transaction.
+4. Insert the `import_file` audit row with the header metadata and provisional counts.
+   Readings reference `file_id`, so this row must exist before they are loaded.
+5. `COPY` normalized readings into a temporary staging table.
+6. `INSERT ... SELECT ... ON CONFLICT` from staging into `reading`.
+7. Update the `import_file` row with the final parsed count and status.
+8. Commit. On any failure, roll back and record `status = error` in a separate
+   transaction.
+
+Compensated files are recorded with `status = 'skipped_compensated'`, `data_kind =
+'compensated'`, and no readings. They are inserted in a separate transaction because
+they never enter the reading load.
 
 ## 7. Status model
 
@@ -135,8 +142,11 @@ overwrite newer data. A re-run of the same export inserts zero rows.
 | `empty` | File contained no log records |
 | `error` | File could not be parsed or loaded; `error` has details |
 | `skipped_duplicate` | SHA-256 already present |
+| `skipped_compensated` | `<Compensation_info>` present; recorded for audit, no readings loaded |
 
 `import_file` is the audit log. The dry-run report and `GET /imports` read from it.
+Compensated files appear as `skipped_compensated` rows with `data_kind = 'compensated'`
+and `parsed_log = 0`.
 
 ## 8. Dry-run report
 
@@ -197,4 +207,4 @@ Configuration comes from environment variables (`PGHOST`, `PGPORT`, `PGDATABASE`
 `PGUSER`, `PGPASSWORD`, `SITE_TIMEZONE`, `INGEST_SETTLE_SECONDS`). Passwords are never
 accepted as command-line arguments in scheduled runs.
 
-This contract is a design target; the CLI is not implemented in the skeleton.
+This contract is a design target; the CLI is not implemented yet.

@@ -1,8 +1,10 @@
 # Roadmap and Acceptance Criteria
 
-The repository is currently at **Phase 0 (skeleton)**. Nothing below is implemented yet.
+The repository is currently at **Phase 1 (schema and local database)**. Phase 0 is
+complete. The Phase 1 SQL and acceptance script are implemented and verified against an
+embedded PostgreSQL 16.2; Docker/Compose verification on the Linux VM is pending.
 
-## Phase 0 — Documentation and skeleton (current)
+## Phase 0 — Documentation and skeleton (complete)
 
 - [x] Architecture summary
 - [x] Data model
@@ -10,22 +12,26 @@ The repository is currently at **Phase 0 (skeleton)**. Nothing below is implemen
 - [x] Network and security design
 - [x] Architecture decisions
 - [x] Repository directory skeleton and configuration templates
-- [ ] Git repository initialized (optional; see note at end)
+- [x] Git repository initialized (local only; no remote configured)
 
 ## Phase 1 — Schema and local database
 
 **Deliverables**
 
-- `db/init/01_schema.sql`: schema, tables, constraints, indexes.
-- `db/init/02_roles.sql`: `transducer_ingest`, `transducer_read`, grants.
-- `db/init/03_views.sql`: `v_reading` and optional UTC view.
-- Runnable `docker compose up db` with a healthy Postgres.
+- [x] `db/init/01_roles.sql`: `transducer_ingest`, `transducer_read`, SCRAM passwords.
+- [x] `db/init/02_schema.sql`: schema, tables, constraints, indexes.
+- [x] `db/init/03_views.sql`: `v_reading`, `v_reading_utc`, `v_import`.
+- [x] `db/init/04_grants.sql`: least-privilege grants.
+- [x] `db/tests/verify_phase1.sh`: acceptance checks.
+- [x] Compose `db` service passes role passwords, forces SCRAM, and uses a TCP healthcheck.
+- [ ] `docker compose up -d db` verified healthy on the Linux VM.
 
 **Exit criteria**
 
-- Schema applies cleanly to an empty volume.
-- Roles authenticate with `scram-sha-256`.
-- Read role cannot write; write role cannot alter schema.
+- [x] Schema applies cleanly to an empty database (verified on embedded PostgreSQL 16.2).
+- [x] Roles authenticate with `scram-sha-256` (verified).
+- [x] Read role cannot write; write role cannot alter schema (verified).
+- [ ] `docker compose down -v` / re-init cycle verified on the VM.
 
 ## Phase 2 — Parser and validation
 
@@ -140,6 +146,6 @@ The repository is currently at **Phase 0 (skeleton)**. Nothing below is implemen
 
 ## Note on Git
 
-This directory was not a Git repository when the skeleton was created. Initialize with
-`git init` when ready, then confirm the OneDrive export folder and `.zip` remain ignored
-before the first commit.
+The repository is initialized locally with no remote configured. Commits stay local
+until a remote is provided. Confirm the OneDrive export folder and `.zip` remain ignored
+before each commit.
