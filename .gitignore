@@ -29,6 +29,9 @@ build/
 *.sql.gz
 pgdata/
 
+# Runtime logs
+logs/
+
 # OS / editor
 .DS_Store
 Thumbs.db

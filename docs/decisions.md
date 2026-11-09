@@ -303,3 +303,47 @@ imported. `--check` exits non-zero when the measured totals differ from the expe
 - Parsing can be tested on the ingest host before the VM is reachable.
 - The same `validate.py` aggregation will feed the Phase 3 dry-run report.
 - A test asserts that importing the report module does not import `psycopg`.
+
+---
+
+## ADR-016: Duplicate files are report-only
+
+**Status:** Accepted (Phase 3)
+
+**Context:** The export contains byte-identical copies (`- Copy`, `(2)`, `_jh`, and a
+`REFERENCE BARO_` duplicate). `import_file.sha256` is unique, so a second audit row cannot be
+written for an identical file. Two kinds of redundancy exist: exact file duplicates and
+files whose readings were already seen in earlier downloads.
+
+**Decision:** A duplicate `sha256` is counted and shown in the run summary but writes no new
+`import_file` row. Redundancy is reported using the same `(serial, channel, ts)` subset rule
+as the database-free report, so the loader reports 29 duplicate files and 31 fully redundant
+files on the current export. A file that is both is counted in both metrics.
+
+**Consequences:**
+
+- `import_file` stays a one-row-per-content audit log (118 rows on a fresh full load).
+- The loader and Phase 2 report agree on the 31 redundant files.
+- Re-running the full export inserts zero rows and reports 147 duplicates.
+
+---
+
+## ADR-017: Database integration tests are opt-in
+
+**Status:** Accepted (Phase 3)
+
+**Context:** The loader must be exercised against real PostgreSQL, but CI and developer
+machines do not always have a database. The database test truncates the transducer tables,
+so it must never run against production.
+
+**Decision:** Mark database tests `integration` and skip them unless `TRANSDUCER_TEST_DSN`
+is set. The DSN must point at a disposable database with the Phase 1 schema applied. Pure
+loader helpers (`parse_since`, `derive_location`, `prepare_files`) are tested without a
+database.
+
+**Consequences:**
+
+- `pytest` passes with no database configured.
+- The full SQL path is verified against an embedded PostgreSQL server during development.
+- Pointing `TRANSDUCER_TEST_DSN` at production would destroy data; the variable name and
+  README warning make the risk explicit.

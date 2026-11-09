@@ -82,6 +82,7 @@ or `Version 4.7.0`, and 20 uncompensated files also use `Version 4.7.0`.
 | Filename/header location mismatch | Warning | Import header location; note in `error` |
 | Duplicate `(series, ts)` within one file | Warning | Keep last occurrence; note count |
 | Unknown channel count or unit | Warning | Import what is known; note in `error` |
+| Blank channel identification or unit | Fatal | `status = error`, no readings |
 | `<Compensation_info>` present | Skip | Not eligible in v1 |
 | Filename/metadata compensation mismatch | Warning | Metadata wins; note in `error` |
 | SHA-256 already imported | Skip | `status = skipped_duplicate` |
@@ -96,8 +97,15 @@ itself cannot be read.
 
 - `sha256` is unique in `import_file`. Exact copies (`- Copy`, `(2)`, `(3)`, `_jh`,
   `REFERENCE BARO_` prefix) are skipped after the first import.
+- A duplicate `sha256` is **report-only**: the file is counted and listed in the run
+  summary, but no second audit row is written. On the current export this skips 29
+  byte-identical files (28 uncompensated, 1 compensated) and leaves 118 `import_file` rows
+  on a fresh full load.
 - 31 of the 101 uncompensated files are fully redundant in the current export when files are
-  ordered by `download_time` then filename.
+  ordered by `download_time` then filename: 28 are exact duplicates and 3 contain only
+  readings already seen in earlier files. Redundancy is computed from the prepared files
+  with the same `(serial, channel, ts)` rule as the database-free report, so the loader and
+  report agree.
 
 ### Row level
 
@@ -133,8 +141,13 @@ overwrite newer data. A re-run of the same export inserts zero rows.
    transaction.
 
 Compensated files are recorded with `status = 'skipped_compensated'`, `data_kind =
-'compensated'`, and no readings. They are inserted in a separate transaction because
-they never enter the reading load.
+'compensated'`, and no readings. They never enter the reading load but are inserted as audit
+rows in their own per-file transaction.
+
+A dry run executes the same per-file transactions inside one outer transaction and rolls
+the whole thing back at the end, so the reported new/overlap counts are exact without
+leaving persistent changes. `--since <date>` filters on the header `<File_info>` download
+time before loading; files without a download time use their modification time.
 
 ## 7. Status model
 
@@ -153,24 +166,35 @@ and `parsed_log = 0`.
 
 ## 8. Dry-run report
 
-`ingest --dry-run` must print, without writing:
+`ingest --dry-run` prints, without writing:
 
-- Eligible, skipped, and already-imported file counts.
-- Per-file outcome: new rows, overlapping rows, internal duplicates, warnings.
-- Aggregate new unique readings and conflicts.
-- A list of anomalous files with reasons.
-- A comparison against expected backfill totals.
+- Selected files split by compensated/uncompensated, plus imported, warning, empty, error,
+  duplicate, and redundant counts.
+- Aggregate new reading rows, overlapping rows, and unique samples.
+- With `--all`, every per-file status, log count, reading count, new rows, and overlaps.
+- A comparison against expected full-export totals.
 
 Expected current-export results:
 
 | Metric | Expected |
 |---|---|
-| Eligible uncompensated files | 101 |
-| Fully redundant files | 31 |
-| Anomalous files | 13 (12 `Stop_time < Start_time`, one of which is empty; 1 malformed XML) |
+| Files selected | 147 (101 uncompensated, 46 compensated) |
+| Imported files | 59 |
+| Warning files | 12 |
 | Empty files | 1 |
-| Unique readings | 113,177 |
+| Error files | 1 |
+| Duplicate files (skipped) | 29 |
+| Fully redundant files | 31 |
+| New `reading` rows | 233,855 |
+| Overlapping rows replaced | 75,117 |
+| Unique samples `(serial, ts)` | 113,177 |
 | Compensated rows | 0 |
+| `import_file` audit rows | 118 (45 `skipped_compensated`) |
+
+The 13 anomalies from the Phase 2 report are all recorded: 12 `Stop_time < Start_time`
+files (one of which is also empty) and 1 malformed XML file. The pure location-mismatch
+warning is counted among the 12 loader warning files but is reported separately by the
+Phase 2 report.
 
 ## 9. Scheduling
 
@@ -201,20 +225,25 @@ Expected current-export results:
 
 ## 12. CLI contract
 
-Phase 2 implements the database-free report:
+The database-free report (Phase 2):
 
 ```
 python -m transducer_ingest.report --source <folder> [--json] [--check] [--all]
 ```
 
-Phase 3 adds the database loader:
+The database loader (Phase 3), also reachable through the installed
+`transducer-ingest` entry point:
 
 ```
-python -m transducer_ingest.cli ingest --source <folder> [--dry-run] [--since <date>]
+python -m transducer_ingest.cli ingest --source <folder> [--dry-run] [--since <date>] [--json] [--all]
+python -m transducer_ingest.cli report --source <folder> [--json] [--check] [--all]
 ```
+
+`--dry-run` rolls back at the end; `--since` filters on header download time; `--json` emits
+the summary as JSON; `--all` lists every per-file result. The `report` subcommand delegates
+to the database-free Phase 2 report, and the loader/`psycopg` imports are lazy, so the
+report still runs without a database driver installed.
 
 Configuration comes from environment variables (`PGHOST`, `PGPORT`, `PGDATABASE`,
 `PGUSER`, `PGPASSWORD`, `SITE_TIMEZONE`, `INGEST_SETTLE_SECONDS`). Passwords are never
 accepted as command-line arguments in scheduled runs.
-
-The ingest command is a design target for Phase 3; the report command is implemented.

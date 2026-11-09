@@ -188,6 +188,20 @@ def validate_file(parsed: ParsedFile) -> tuple[Status, list[str], str | None]:
 
     if parsed.error:
         return Status.ERROR, warnings, parsed.error
+
+    blank_channels = [
+        channel.channel_no
+        for channel in metadata.channels
+        if not channel.identification.strip() or not channel.unit.strip()
+    ]
+    if blank_channels:
+        channels = ", ".join(str(number) for number in blank_channels)
+        return (
+            Status.ERROR,
+            warnings,
+            f"blank identification or unit on channel(s) {channels}",
+        )
+
     if parsed.log_count == 0:
         return Status.EMPTY, warnings, None
     if warnings:

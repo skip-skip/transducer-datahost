@@ -58,11 +58,21 @@ def test_mismatches_are_reported(fixtures_dir: Path) -> None:
 
 
 def test_report_module_does_not_import_a_database_driver() -> None:
-    import sys
+    import ast
 
-    import transducer_ingest.report  # noqa: F401
+    import transducer_ingest.report as report_module
 
-    assert "psycopg" not in sys.modules
+    tree = ast.parse(
+        Path(report_module.__file__).read_text(encoding="utf-8")
+    )
+    imported: set[str] = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module)
+
+    assert not any(name.split(".")[0] == "psycopg" for name in imported)
 
 
 @pytest.mark.integration

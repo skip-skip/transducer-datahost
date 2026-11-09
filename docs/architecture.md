@@ -123,8 +123,9 @@ connections from the ingest host.
 | Time zone handling | Postgres `AT TIME ZONE` | Correct local/UTC conversion at query time |
 | Scheduling | Windows Task Scheduler (ingest), cron/systemd (backup) | Uses existing platform tooling |
 
-No TimescaleDB extension is required at the current data volume (~113k unique readings).
-A BRIN index on `ts` is sufficient. TimescaleDB can be added later without schema changes.
+No TimescaleDB extension is required at the current data volume (~113k unique samples,
+233,855 reading rows). A BRIN index on `ts` is sufficient. TimescaleDB can be added later
+without schema changes.
 
 ## 8. Source data profile
 
@@ -137,7 +138,7 @@ A BRIN index on `ts` is sufficient. TimescaleDB can be added later without schem
 | Long-term interval | 4 hours |
 | Aquifer-test (`_AT_`) interval | 2 Hz (`ms` = 0 / 500) |
 | Uncompensated rows | 173,508 |
-| Unique rows `(serial, timestamp, ms)` | 113,177 |
+| Unique samples `(serial, ts)` | 113,177 |
 | Series readings `(serial, channel, timestamp, ms)` | 233,855 |
 | Fully redundant files | 31 (ordered by `download_time`, then filename) |
 | Anomalous files | 13 files with header/data anomalies (12 `Stop_time < Start_time`, one of which also has zero logs; 1 malformed XML file) |
