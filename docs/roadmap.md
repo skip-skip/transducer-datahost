@@ -13,7 +13,7 @@ Docker/Compose verification on the Linux VM is pending.
 - [x] Network and security design
 - [x] Architecture decisions
 - [x] Repository directory skeleton and configuration templates
-- [x] Git repository initialized (local only; no remote configured)
+- [x] Git repository initialized with a GitHub remote
 
 ## Phase 1 — Schema and local database
 
@@ -24,6 +24,7 @@ Docker/Compose verification on the Linux VM is pending.
 - [x] `db/init/03_views.sql`: `v_reading`, `v_reading_utc`, `v_import`.
 - [x] `db/init/04_grants.sql`: least-privilege grants.
 - [x] `db/tests/verify_phase1.sh`: acceptance checks.
+- [x] `db/tests/run_phase1.sh`: runs the acceptance checks inside the Compose `db` service.
 - [x] Compose `db` service passes role passwords, forces SCRAM, and uses a TCP healthcheck.
 - [ ] `docker compose up -d db` verified healthy on the Linux VM.
 
