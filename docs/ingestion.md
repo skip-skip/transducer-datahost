@@ -244,6 +244,8 @@ the summary as JSON; `--all` lists every per-file result. The `report` subcomman
 to the database-free Phase 2 report, and the loader/`psycopg` imports are lazy, so the
 report still runs without a database driver installed.
 
-Configuration comes from environment variables (`PGHOST`, `PGPORT`, `PGDATABASE`,
-`PGUSER`, `PGPASSWORD`, `SITE_TIMEZONE`, `INGEST_SETTLE_SECONDS`). Passwords are never
+Configuration comes from environment variables (`POSTGRES_HOST`, `POSTGRES_PORT`,
+`POSTGRES_DB`, `INGEST_USER`, `INGEST_PASSWORD`, `SITE_TIMEZONE`,
+`INGEST_SETTLE_SECONDS`). The loader authenticates with the least-privilege ingest role,
+so it does not use the admin `POSTGRES_USER` / `POSTGRES_PASSWORD`. Passwords are never
 accepted as command-line arguments in scheduled runs.

@@ -13,6 +13,7 @@ order the first time the data volume is initialized.
 | `init/03_views.sql` | `v_reading`, `v_reading_utc`, and `v_import`. |
 | `init/04_grants.sql` | Least-privilege grants and `PUBLIC` revokes. |
 | `tests/verify_phase1.sh` | Phase 1 acceptance checks (roles, SCRAM, grants, views, constraints). |
+| `tests/run_phase1.sh` | Runs the acceptance checks inside the Compose `db` service. |
 
 `01_roles.sql` runs first so a missing or empty role password stops initialization
 immediately. Each SQL file wraps its work in a transaction so a failure cannot leave a
@@ -43,14 +44,31 @@ socket-only temporary server used during initialization is not reported as ready
 
 ## Verification
 
-Run the acceptance script against the initialized database:
+The recommended path runs the checks inside the Compose `db` service, so the host
+does not need `psql` and `.env` does not need to be sourced:
+
+```bash
+docker compose up -d db
+db/tests/run_phase1.sh
+```
+
+Compose loads `.env` and passes `POSTGRES_PASSWORD`, `INGEST_PASSWORD`, and
+`READ_PASSWORD` to the container. `run_phase1.sh` sets `ALLOW_NON_TEST_DB=1`
+because the Compose database is normally `transducer`, not a `_test` database.
+
+To run the checks directly against any reachable database:
 
 ```bash
 ALLOW_NON_TEST_DB=1 \
-PGHOST=127.0.0.1 PGPORT=5432 PGDATABASE=transducer PGUSER=transducer_admin \
-PGPASSWORD=... INGEST_PASSWORD=... READ_PASSWORD=... \
+POSTGRES_HOST=127.0.0.1 POSTGRES_PORT=5432 POSTGRES_DB=transducer \
+POSTGRES_USER=transducer_admin POSTGRES_PASSWORD=... \
+INGEST_PASSWORD=... READ_PASSWORD=... \
 db/tests/verify_phase1.sh
 ```
+
+`POSTGRES_PASSWORD` is the admin/provisioning password; the loader uses
+`INGEST_PASSWORD` and the API uses `READ_PASSWORD`. The legacy `PGHOST`, `PGPORT`,
+`PGDATABASE`, `PGUSER`, and `PGPASSWORD` names still work as fallbacks.
 
 The script refuses database names that do not end in `_test` unless
 `ALLOW_NON_TEST_DB=1` is set. It inserts reserved test rows and removes them on exit.

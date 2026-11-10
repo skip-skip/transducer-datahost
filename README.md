@@ -93,6 +93,22 @@ It is intentionally **not** committed (see `.gitignore`). It contains 147 `.xle`
 `<Compensation_info>` metadata block in the file body; filenames are only a consistency
 check. The sibling `.zip` is the same content zipped and is also ignored.
 
+## Configuration
+
+Copy `.env.example` to `.env` and set the three role passwords. PostgreSQL settings use
+the canonical `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and
+`POSTGRES_PASSWORD` names for the admin/provisioning role. The loader uses
+`INGEST_USER` / `INGEST_PASSWORD`, and the API uses `READ_USER` / `READ_PASSWORD`. Do
+not set `PGPASSWORD`; it remains only an internal detail of the `psql` child processes in
+the acceptance script.
+
+Run the Phase 1 checks inside the Compose database service:
+
+```bash
+docker compose up -d db
+db/tests/run_phase1.sh
+```
+
 ## Next step
 
 Verify `docker compose up -d db` on the Linux VM, then start Phase 4 (infrastructure and

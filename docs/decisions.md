@@ -347,3 +347,26 @@ database.
 - The full SQL path is verified against an embedded PostgreSQL server during development.
 - Pointing `TRANSDUCER_TEST_DSN` at production would destroy data; the variable name and
   README warning make the risk explicit.
+
+## ADR-018: Use canonical `POSTGRES_*` environment variables
+
+**Status:** Accepted (Phase 3)
+
+**Context:** The Compose database reads `POSTGRES_PASSWORD`, but the acceptance script and
+loader originally used libpq's `PG*` names. Operators therefore had to set two different
+password variables, and `PGPASSWORD` was not actually read by the Postgres container.
+
+**Decision:** Make `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and
+`POSTGRES_PASSWORD` the canonical admin/provisioning settings. Role-specific variables stay
+separate: the loader reads `INGEST_USER` / `INGEST_PASSWORD`, and the API reads `READ_USER`
+/ `READ_PASSWORD`. `PGPASSWORD` remains only an internal detail passed to `psql` child
+processes. The acceptance script still accepts the legacy `PG*` names as fallbacks.
+
+**Consequences:**
+
+- Operators set one password variable per role and do not need to know libpq internals.
+- The loader never needs the admin password, preserving least privilege.
+- Tools that connect through libpq directly (for example, an ad hoc `psql`) must still use
+  `PGPASSWORD` or a connection string; this is a client requirement, not a repository one.
+- `db/tests/run_phase1.sh` runs the acceptance checks inside the Compose database service,
+  so the host does not need `psql` or a sourced `.env`.

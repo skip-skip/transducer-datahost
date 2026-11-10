@@ -3,6 +3,9 @@
 # Task Scheduler wrapper for the Phase 3 loader. It prevents overlapping runs
 # with a machine-wide mutex and appends timestamped output to a daily log.
 #
+# The loader reads POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, INGEST_USER,
+# INGEST_PASSWORD, and optional SITE_TIMEZONE from the process environment.
+#
 # Example:
 #   .\scripts\run_ingest.ps1 -Source "C:\path\to\OneDrive_1_11-9-2026"
 

@@ -20,6 +20,12 @@
 - Runs `python -m transducer_ingest.cli ingest` against the source folder and exits with its
   code.
 
+The wrapper inherits its environment from the Task Scheduler process. Set the canonical
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `INGEST_USER`, and `INGEST_PASSWORD`
+variables (plus optional `SITE_TIMEZONE`) before scheduling. The loader does not read
+`PGPASSWORD`; that name remains only an internal detail of `psql` child processes in the
+database acceptance script.
+
 ## Scheduling
 
 - Ingest: Windows Task Scheduler, e.g. every 6 hours.

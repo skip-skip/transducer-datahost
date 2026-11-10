@@ -13,7 +13,7 @@ ingest/
     parse_xle.py    # XML -> normalized records
     validate.py     # statuses, anomaly classification, folder report
     report.py       # database-free report CLI
-    db.py           # PG* connection configuration
+    db.py           # POSTGRES_* / INGEST_* connection configuration
     load.py         # staging COPY + upsert loader and deduplication
     cli.py          # ingest/report CLI
   tests/
@@ -51,9 +51,11 @@ entry points. `--source` is scanned recursively for `.xle` files. `--check` exit
 when the aggregate totals differ from the expected current export. The report never imports
 a database driver.
 
-The loader reads `PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGPASSWORD`, and
-`SITE_TIMEZONE` (default `America/New_York`). `--dry-run` executes the load inside one
-transaction and rolls it back; `--since` filters on the header download time.
+The loader reads `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `INGEST_USER`,
+`INGEST_PASSWORD`, and `SITE_TIMEZONE` (default `America/New_York`). It connects with the
+least-privilege ingest role, not the admin `POSTGRES_USER` / `POSTGRES_PASSWORD`.
+`--dry-run` executes the load inside one transaction and rolls it back; `--since` filters
+on the header download time.
 
 Expected current-export totals (measured against `OneDrive_1_11-9-2026`):
 

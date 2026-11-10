@@ -7,7 +7,9 @@
 # names and are removed on exit.
 #
 # Connection settings (admin):
-#   PGHOST, PGPORT, PGDATABASE, PGUSER, PGPASSWORD
+#   POSTGRES_HOST, POSTGRES_PORT, POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD
+#   Legacy PGHOST, PGPORT, PGDATABASE, PGUSER, and PGPASSWORD are accepted as
+#   fallbacks so existing environments keep working.
 # Role settings:
 #   INGEST_USER (default transducer_ingest), INGEST_PASSWORD
 #   READ_USER   (default transducer_read),   READ_PASSWORD
@@ -16,17 +18,17 @@
 #   ALLOW_NON_TEST_DB   set to 1 to allow a database name not ending in _test
 #
 # Example (Docker, database "transducer"):
-#   ALLOW_NON_TEST_DB=1 PGPASSWORD=... INGEST_PASSWORD=... READ_PASSWORD=... \
+#   ALLOW_NON_TEST_DB=1 POSTGRES_PASSWORD=... INGEST_PASSWORD=... READ_PASSWORD=... \
 #       db/tests/verify_phase1.sh
 
 set -euo pipefail
 
 PSQL_BIN=${PSQL_BIN:-psql}
-PGHOST=${PGHOST:-127.0.0.1}
-PGPORT=${PGPORT:-5432}
-PGDATABASE=${PGDATABASE:-transducer}
-PGUSER=${PGUSER:-transducer_admin}
-ADMIN_PASSWORD=${PGPASSWORD:-}
+POSTGRES_HOST=${POSTGRES_HOST:-${PGHOST:-127.0.0.1}}
+POSTGRES_PORT=${POSTGRES_PORT:-${PGPORT:-5432}}
+POSTGRES_DB=${POSTGRES_DB:-${PGDATABASE:-transducer}}
+POSTGRES_USER=${POSTGRES_USER:-${PGUSER:-transducer_admin}}
+ADMIN_PASSWORD=${POSTGRES_PASSWORD:-${PGPASSWORD:-}}
 INGEST_USER=${INGEST_USER:-transducer_ingest}
 INGEST_PASSWORD=${INGEST_PASSWORD:-}
 READ_USER=${READ_USER:-transducer_read}
@@ -40,14 +42,14 @@ fail() { FAILED=$((FAILED + 1)); printf 'FAIL %s\n' "$1" >&2; }
 
 admin_psql() {
     PGPASSWORD="$ADMIN_PASSWORD" "$PSQL_BIN" -X -q -w -v ON_ERROR_STOP=1 \
-        -h "$PGHOST" -p "$PGPORT" -U "$PGUSER" -d "$PGDATABASE" "$@"
+        -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" "$@"
 }
 
 role_psql() {
     local role=$1 password=$2
     shift 2
     PGPASSWORD="$password" "$PSQL_BIN" -X -q -w -v ON_ERROR_STOP=1 \
-        -h "$PGHOST" -p "$PGPORT" -U "$role" -d "$PGDATABASE" "$@"
+        -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$role" -d "$POSTGRES_DB" "$@"
 }
 
 query_admin() { admin_psql -Atc "$1"; }
@@ -105,7 +107,7 @@ if ! command -v "$PSQL_BIN" >/dev/null 2>&1; then
 fi
 
 if [ -z "$ADMIN_PASSWORD" ]; then
-    printf 'PGPASSWORD (admin password) must be set\n' >&2
+    printf 'POSTGRES_PASSWORD (admin password) must be set\n' >&2
     exit 2
 fi
 if [ -z "$INGEST_PASSWORD" ] || [ -z "$READ_PASSWORD" ]; then
@@ -113,12 +115,12 @@ if [ -z "$INGEST_PASSWORD" ] || [ -z "$READ_PASSWORD" ]; then
     exit 2
 fi
 
-case "$PGDATABASE" in
+case "$POSTGRES_DB" in
     *_test|*_test_*) ;;
     *)
         if [ "${ALLOW_NON_TEST_DB:-0}" != "1" ]; then
             printf "refusing to run against non-test database '%s' (set ALLOW_NON_TEST_DB=1 to override)\n" \
-                "$PGDATABASE" >&2
+                "$POSTGRES_DB" >&2
             exit 2
         fi
         ;;
@@ -126,7 +128,7 @@ esac
 
 if ! admin_psql -Atc "SELECT 1" >/dev/null 2>&1; then
     printf 'cannot connect as %s to %s at %s:%s\n' \
-        "$PGUSER" "$PGDATABASE" "$PGHOST" "$PGPORT" >&2
+        "$POSTGRES_USER" "$POSTGRES_DB" "$POSTGRES_HOST" "$POSTGRES_PORT" >&2
     exit 2
 fi
 
@@ -159,7 +161,7 @@ trap cleanup EXIT
 
 cleanup
 
-printf 'Verifying %s on %s:%s as %s\n\n' "$PGDATABASE" "$PGHOST" "$PGPORT" "$PGUSER"
+printf 'Verifying %s on %s:%s as %s\n\n' "$POSTGRES_DB" "$POSTGRES_HOST" "$POSTGRES_PORT" "$POSTGRES_USER"
 
 # ---------------------------------------------------------------------------
 # Roles and password encryption
@@ -195,9 +197,9 @@ check_bool "ingest cannot create schemas" 'f' \
 check_bool "read cannot create schemas" 'f' \
     "SELECT has_database_privilege('$READ_USER', current_database(), 'CREATE');"
 check_bool "ingest is not a member of the admin role" 'f' \
-    "SELECT pg_has_role('$INGEST_USER', '$PGUSER', 'MEMBER');"
+    "SELECT pg_has_role('$INGEST_USER', '$POSTGRES_USER', 'MEMBER');"
 check_bool "read is not a member of the admin role" 'f' \
-    "SELECT pg_has_role('$READ_USER', '$PGUSER', 'MEMBER');"
+    "SELECT pg_has_role('$READ_USER', '$POSTGRES_USER', 'MEMBER');"
 
 # ---------------------------------------------------------------------------
 # Authentication over TCP with SCRAM

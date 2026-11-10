@@ -1,8 +1,10 @@
 """PostgreSQL connection helpers for the transducer loader.
 
-Configuration comes from the standard ``PG*`` environment variables so the same
-code works on the ingest host and in Compose. Passwords are read from the
-environment and are never accepted on the command line.
+Connection settings come from the canonical ``POSTGRES_*`` environment variables
+used by the rest of the repository. The loader authenticates with the ingest
+role (``INGEST_USER`` / ``INGEST_PASSWORD``) so it never needs the admin
+password. Passwords are read from the environment and are never accepted on the
+command line.
 """
 
 from __future__ import annotations
@@ -27,11 +29,11 @@ class DatabaseConfig:
     @classmethod
     def from_env(cls) -> DatabaseConfig:
         return cls(
-            host=os.environ.get("PGHOST", "127.0.0.1"),
-            port=int(os.environ.get("PGPORT", "5432")),
-            dbname=os.environ.get("PGDATABASE", "transducer"),
-            user=os.environ.get("PGUSER", "transducer_ingest"),
-            password=os.environ.get("PGPASSWORD", ""),
+            host=os.environ.get("POSTGRES_HOST", "127.0.0.1"),
+            port=int(os.environ.get("POSTGRES_PORT", "5432")),
+            dbname=os.environ.get("POSTGRES_DB", "transducer"),
+            user=os.environ.get("INGEST_USER", "transducer_ingest"),
+            password=os.environ.get("INGEST_PASSWORD", ""),
         )
 
     def connect(self) -> Connection:
@@ -46,7 +48,7 @@ class DatabaseConfig:
 
 
 def connect() -> Connection:
-    """Open a connection using the ``PG*`` environment variables."""
+    """Open a connection using the canonical ``POSTGRES_*`` environment variables."""
 
     return DatabaseConfig.from_env().connect()
 
