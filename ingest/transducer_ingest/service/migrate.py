@@ -99,12 +99,15 @@ def ensure_roles(conn: Connection) -> list[str]:
             conn.execute(
                 sql.SQL("CREATE ROLE {}").format(sql.Identifier(role))
             )
+        # PostgreSQL only accepts a string literal here (``PASSWORD 'x'``),
+        # not a bind parameter: the extended protocol rejects ``PASSWORD $1``
+        # with "syntax error at or near \"$1\"". Render the value client-side
+        # with sql.Literal so quoting and escaping stay correct.
         conn.execute(
             sql.SQL(
                 "ALTER ROLE {} WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE "
-                "NOREPLICATION NOBYPASSRLS PASSWORD %s"
-            ).format(sql.Identifier(role)),
-            (password,),
+                "NOREPLICATION NOBYPASSRLS PASSWORD {}"
+            ).format(sql.Identifier(role), sql.Literal(password))
         )
         conn.execute(
             sql.SQL("ALTER ROLE {} SET search_path = {}").format(
