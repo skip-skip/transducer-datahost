@@ -3,87 +3,114 @@
 ## 1. Topology
 
 ```
-+-----------------------------+          +-----------------------------+
-| Windows host                |          | Linux VM                    |
-| - OneDrive sync             |  TCP     | - Docker Engine             |
-| - Scheduled ingester        |  5432    | - postgres:16 (db)          |
-| - write role only           | -------> | - FastAPI (api)             |
-+-----------------------------+          | - pg_dump backups           |
-                                         +--------------+--------------+
-                                                        | TCP 5432 (read-only)
-                                                        |
-                                         +--------------+--------------+
-                                         | Internal consumers          |
-                                         | - analysts (SQL)            |
-                                         | - dashboards (HTTP :8000)   |
-                                         +-----------------------------+
++-----------------------------+          +--------------------------------------+
+| Windows upload host         |          | Linux VM                             |
+| - OneDrive sync             |  HTTPS   | - Docker Engine                      |
+| - uploader CLI              |  8443    | - Caddy (TLS, only published port)   |
+| - ingest bearer token only  | -------> | - ingest-api  (upload role)          |
++-----------------------------+          | - ingest-worker (ingest role)        |
+                                         | - read-api    (read role)            |
+                                         | - postgres:16 (no published port)    |
+                                         | - pg_dump backups                    |
+                                         +-------------------+------------------+
+                                                             | HTTPS 8443
+                                                             |
+                                         +-------------------+------------------+
+                                         | Internal consumers                   |
+                                         | - analysts (read API)                |
+                                         | - dashboards (read API)              |
+                                         +--------------------------------------+
 ```
 
-All traffic stays on the internal network. There is no public exposure.
+All traffic stays on the internal network. There is no public exposure. Only Caddy
+publishes a host port; PostgreSQL and both application services are reachable only on the
+internal Compose network `backend` (`internal: true`).
 
 ## 2. Firewall rules
 
 | Source | Destination | Port | Purpose | Rule |
 |---|---|---|---|---|
-| Ingest host | DB VM | 5432 | Writes | Allow from ingest host IP only |
-| Dashboard/analyst subnet | DB VM | 5432 | Read-only SQL | Allow from internal subnet |
-| Dashboard/analyst subnet | API VM | 8000 | Read-only HTTP | Allow from internal subnet |
-| Everything else | DB VM / API VM | 5432 / 8000 | — | Deny |
+| Windows upload host | VM | 8443 | HTTPS uploads | Allow from upload host IP only |
+| Dashboard/analyst subnet | VM | 8443 | Read-only API | Allow from internal subnet |
+| Everything else | VM | 8443 | — | Deny |
+| Any | VM | 5432 | PostgreSQL | Deny (no published port) |
 
-Implementation: `ufw`/`firewalld` on the VM, plus any upstream network ACL. Publish Docker
-ports on the internal interface rather than `0.0.0.0` where possible.
+Implementation: `ufw`/`firewalld` on the VM, plus any upstream network ACL. Bind Caddy to
+the internal interface rather than `0.0.0.0` where possible. Never add a Compose `ports:`
+entry for `db`, `ingest-api`, `ingest-worker`, or `read-api`.
 
 ## 3. PostgreSQL roles
 
 | Role | Capabilities | Used by |
 |---|---|---|
-| `transducer_admin` | Owner; DDL and maintenance | Provisioning only |
-| `transducer_ingest` | `SELECT`/`INSERT`/`UPDATE` on the five base tables and `USAGE`/`SELECT` on sequences; no `DELETE`, `TRUNCATE`, or DDL | Ingester |
-| `transducer_read` | `SELECT` on `logger`, `location`, `series`, `reading`, and the three read views; no direct `import_file` access, no sequences, no writes | API and analysts |
+| `transducer_admin` | Owner; DDL and maintenance | Provisioning and the `migrate` service only |
+| `transducer_upload` | `SELECT`/`INSERT`/`UPDATE` on `ingest.job`, `SELECT` on `ingest.worker_heartbeat`, `EXECUTE` on `ingest.file_known()`, `USAGE`/`SELECT` on `ingest` sequences; no domain tables, no `DELETE`, no DDL | Ingest API |
+| `transducer_ingest` | `SELECT`/`INSERT`/`UPDATE` on the five domain base tables and the `ingest` queue/heartbeat; `USAGE`/`SELECT` on sequences; no `DELETE`, `TRUNCATE`, or DDL | Ingest worker/loader |
+| `transducer_read` | `SELECT` on `logger`, `location`, `series`, `reading`, and the three read views; no direct `import_file` access, no `ingest` access, no sequences, no writes | Read API |
 
 Rules:
 
 - Application roles never own objects.
 - `transducer_read` has no direct access to `import_file`; the curated `v_import` view
   exposes the audit fields, including `error`.
-- Passwords are generated, stored in the secret store / `.env` on the host, and rotated.
+- `transducer_upload` cannot read domain tables. `ingest.file_known()` is a
+  `SECURITY DEFINER` function that returns only a boolean, so the upload API can answer
+  `HEAD /v1/files/{sha}` without `SELECT` on `import_file`.
+- Passwords are generated, stored in the secret store / `.env` on the VM, and rotated.
 - No shared superuser credentials in application config.
+- Role `search_path` is pinned: upload sees `pg_catalog, ingest`; worker sees
+  `pg_catalog, transducer, ingest`; read sees `pg_catalog, transducer`.
 
 ## 4. Authentication
 
-- `password_encryption = scram-sha-256`; both application roles are created with SCRAM
-  passwords by `db/init/01_roles.sql`.
+### Database
+
+- `password_encryption = scram-sha-256`; all application roles are created with SCRAM
+  passwords by `db/init/01_roles.sql` and refreshed by the migrate runner.
 - Compose sets `POSTGRES_HOST_AUTH_METHOD=scram-sha-256` and initializes with
   `--auth-host=scram-sha-256 --auth-local=scram-sha-256`, so the generated `pg_hba.conf`
   contains no `trust` entries.
-- `pg_hba.conf` entries are scoped by database, role, and source subnet, for example:
+- Because PostgreSQL is not published, only containers on `backend` can connect. If a
+  direct connection is ever needed for maintenance, use
+  `docker compose exec db psql ...`, not a published port.
 
-```
-# TYPE  DATABASE     USER                ADDRESS           METHOD
-host    transducer   transducer_ingest   10.20.30.41/32    scram-sha-256
-host    transducer   transducer_read     10.20.0.0/16      scram-sha-256
-```
+### API
 
-- Reject all other remote connections.
-- Enable TLS (`ssl = on`) if traffic crosses untrusted segments; otherwise document the
-  internal-only assumption.
+- TLS is mandatory. Caddy terminates HTTPS on 8443 with a certificate for
+  `INGEST_HOSTNAME` (see `certs/README.md`).
+- Both APIs use static bearer tokens configured as comma-separated `label:token` pairs:
+  - `INGEST_API_TOKENS` for the upload API.
+  - `READ_API_TOKENS` for the read API.
+- Tokens are compared with `secrets.compare_digest`, and every configured entry is
+  compared so response time does not reveal which label matched.
+- The token label is recorded on `ingest.job.source_client` and in the API logs for audit.
+- The read API applies authentication at the router level, before opening a database
+  connection.
+- `/health` is unauthenticated so Compose and the proxy can probe liveness. It exposes no
+  data.
 
 ## 5. Secrets management
 
 - `.env` is never committed (see `.gitignore`).
 - `.env.example` documents required variables with placeholder values.
-- Production values live on the VM/host with restrictive file permissions.
-- Rotate database passwords on a defined schedule and after staff changes.
-- The API uses only the read-only role.
+- `certs/*.crt`, `certs/*.key`, and CA material are ignored by Git.
+- Production values live on the VM with restrictive file permissions.
+- Rotate database passwords and API tokens on a defined schedule and after staff changes.
+  Regenerate `INGEST_API_TOKENS` / `READ_API_TOKENS` per client so a single token can be
+  revoked without affecting others.
+- The Windows upload host holds only `INGEST_API_TOKEN`; it has no database credential.
+- The read API uses only the read-only role; the upload API uses only the queue role.
 
 ## 6. API security
 
-- Read-only endpoints; no mutation verbs.
-- CORS restricted to known dashboard origins (`API_CORS_ORIGINS`).
-- Request limits: maximum time window and row count per query; pagination required.
+- Read API has read-only endpoints; no mutation verbs.
+- Ingest API accepts only `.xle` uploads, caps body size at `MAX_UPLOAD_BYTES` (10 MB by
+  default), and requires the `</Body_xle>` completeness marker.
+- CORS restricted to known dashboard origins (`API_CORS_ORIGINS`); empty by default.
+- Read request limits: maximum time window and row count per query; pagination required.
 - No SQL string interpolation; parameterized queries only.
-- Optional reverse proxy for TLS and centralized access logs.
-- Rate limiting at the proxy for untrusted internal clients.
+- Caddy is the only public listener and logs requests as JSON.
+- Rate limiting can be added at the proxy for untrusted internal clients.
 
 ## 7. Backups
 
@@ -97,21 +124,26 @@ host    transducer   transducer_read     10.20.0.0/16      scram-sha-256
 
 | Signal | Source | Action |
 |---|---|---|
-| Ingest failures | `import_file.status = 'error'` | Alert ingest owner |
-| No successful ingest in 24h | Scheduler log / heartbeat table | Alert |
+| Ingest failures | `ingest.job.status = 'failed'` or `import_file.status = 'error'` | Alert ingest owner |
+| Worker stopped | `ingest.worker_heartbeat` older than `WORKER_HEARTBEAT_TIMEOUT_SECONDS` | Alert; Compose healthcheck marks the worker unhealthy |
+| Upload rejected | Ingest API 4xx/5xx logs | Investigate token, certificate, or file |
 | DB disk usage | Host metrics | Alert at 80% |
-| Connection failures | Postgres logs | Investigate firewall/credentials |
+| Connection failures | Postgres logs | Investigate credentials |
 | API 5xx rate | API logs/proxy | Investigate |
+| Certificate expiry | Caddy/client errors | Rotate per `certs/README.md` |
 
 ## 9. Hardening checklist
 
-- [ ] Postgres bound to the internal interface; no public port mapping.
+- [ ] Only Caddy publishes a port (8443).
+- [ ] PostgreSQL has no published port and `backend` is `internal: true`.
 - [ ] Firewall default-deny with explicit allow rules.
 - [ ] `scram-sha-256` only; no `trust` entries.
-- [ ] Separate write/read roles; no application superuser.
-- [ ] `.env` excluded from version control.
+- [ ] Separate upload/worker/read roles; no application superuser.
+- [ ] TLS certificate valid for `INGEST_HOSTNAME`; clients trust the CA.
+- [ ] Distinct bearer tokens per upload client and per analyst.
+- [ ] `.env` and TLS material excluded from version control.
 - [ ] Container images pinned to explicit versions.
 - [ ] Automated backups verified by restore.
 - [ ] OS and image security updates scheduled.
 - [ ] API CORS limited and pagination enforced.
-- [ ] Audit trail (`import_file`) retained.
+- [ ] Audit trail (`import_file`, `ingest.job`) retained.

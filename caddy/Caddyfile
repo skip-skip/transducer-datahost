@@ -1,0 +1,40 @@
+# Caddy TLS front door for the ingest gateway and read API.
+#
+# The public listener is :8443. Caddy terminates TLS with the certificate in
+# /etc/caddy/certs (see certs/README.md) and routes by path prefix:
+#
+#   /ingest/*  -> ingest-api:8080   (prefix stripped)
+#   /api/*     -> read-api:8080     (prefix stripped)
+#
+# Only Caddy is reachable from the host. PostgreSQL and both application
+# containers stay on the internal Compose network.
+
+{
+	admin off
+	auto_https off
+}
+
+https://{$INGEST_HOSTNAME:transducer.internal}:8443 {
+	tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
+
+	encode zstd gzip
+
+	# The uploader posts to https://host:8443/ingest/v1/uploads.
+	handle_path /ingest/* {
+		reverse_proxy ingest-api:8080
+	}
+
+	# Analysts and dashboards use https://host:8443/api/loggers, and so on.
+	handle_path /api/* {
+		reverse_proxy read-api:8080
+	}
+
+	handle {
+		respond "Not found" 404
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}

@@ -8,19 +8,20 @@ logger exports, and a read-only interface for internal dashboards and analysts.
 The source of truth remains the OneDrive export folder. The database is a derived,
 queryable copy with provenance back to the originating `.xle` file.
 
-**Current status:** Phase 1 (schema, roles, views, and grants) is implemented in
-`db/init` and verified against PostgreSQL 16.2. Docker/Compose verification on the Linux
-VM is pending. See [docs/roadmap.md](roadmap.md).
+**Current status:** the schema, parser, loader, VM-hosted ingest gateway, and read API are
+implemented. Unit tests pass locally; Docker/Compose verification and the production
+backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 
 ## 2. Scope
 
 ### In scope (v1)
 
-- Ingest all uncompensated `.xle` files from the export folder.
+- Accept all uncompensated `.xle` files from the export folder via manual HTTPS upload.
+- Parse, validate, deduplicate, and load on the VM next to PostgreSQL.
 - Preserve native timestamps and sample intervals.
 - Deduplicate repeated files and overlapping logger downloads.
 - Track every imported file and its validation status.
-- Expose data through PostgreSQL (read-only role) and a FastAPI read-only service.
+- Expose data through a bearer-token read-only API.
 - Support local-time and UTC representations of timestamps.
 
 ### Out of scope (v1)
@@ -29,7 +30,9 @@ VM is pending. See [docs/roadmap.md](roadmap.md).
 - Dashboard user interface.
 - Write access for dashboards.
 - Public internet exposure, SSO, or per-user authorization.
-- Real-time streaming; ingestion is batch/scheduled.
+- Real-time streaming; ingestion is batch and manually triggered.
+- Direct SQL access for analysts.
+- Scheduled/automated uploads.
 
 ## 3. System context
 
@@ -39,76 +42,100 @@ VM is pending. See [docs/roadmap.md](roadmap.md).
 | (Windows host, .xle files)  |
 +--------------+--------------+
                |
-               | file discovery + parse
+               | HTTPS + bearer token
+               | (manual uploader CLI)
                v
-+-----------------------------+          TCP 5432          +-----------------------------+
-| Ingester                    | ------------------------> | PostgreSQL 16               |
-| Python CLI                  |   write role              | Linux VM, Docker            |
-| - parse .xle                |                           | schema: transducer          |
-| - validate                  |                           |                             |
-| - deduplicate               |                           |                             |
-| - upsert readings           |                           |                             |
-+-----------------------------+                           +--------------+--------------+
-                                                                        ^
-                                                                        | TCP 5432
-                                                                        | read-only role
-                                                          +-------------+--------------+
-                                                          | FastAPI read-only service  |
-                                                          | Linux VM, Docker, :8000    |
-                                                          +-------------+--------------+
-                                                                        ^
-                                                                        | HTTP(S)
-                                                          +-------------+--------------+
-                                                          | Dashboards / analysts      |
-                                                          | internal network           |
-                                                          +----------------------------+
++-----------------------------+          +-----------------------------+
+| Caddy TLS front door        |          | PostgreSQL 16               |
+| Linux VM, :8443             |          | Linux VM, Docker            |
+| /ingest/* -> ingest API     |          | schemas: transducer, ingest |
+| /api/*    -> read API       |          | no published port           |
++------+----------------------+          +--------------+--------------+
+       |                                                ^
+       | internal Compose network                       |
+       v                                                |
++-----------------------------+   enqueue / claim / load |
+| ingest API + single worker  |-------------------------+
+| upload role (queue only)    |    ingest role (domain + queue)
+| worker role (domain+queue)  |
++-----------------------------+
+
++-----------------------------+          +-----------------------------+
+| read API (read role)        |--------->| Dashboards / analysts       |
+| Linux VM, internal network  |  HTTPS   | internal network            |
++-----------------------------+          +-----------------------------+
 ```
+
+All inbound traffic enters through Caddy on port 8443. PostgreSQL and both application
+containers are on an internal Compose network with no published ports and no route to the
+host or the internet.
 
 ## 4. Components
 
 | Component | Responsibility | Runtime |
 |---|---|---|
 | Source export | Authoritative `.xle` files delivered via OneDrive | Windows host |
-| Ingester | Discover, parse, validate, deduplicate, and upsert uncompensated data; record file provenance | Windows host (where OneDrive syncs), scheduled |
-| PostgreSQL | Durable store, deduplication keys, query surface, audit trail | Linux VM, Docker |
-| FastAPI service | Read-only REST access with local/UTC time handling; hides DB credentials from dashboards | Linux VM, Docker |
-| Consumers | Analysts (SQL via read-only role) and dashboards (HTTP API) | Internal network |
+| Uploader CLI | Scan, settle-check, hash, `HEAD`, and `POST` files; poll jobs | Windows host |
+| Caddy | Terminate TLS and route `/ingest/*` and `/api/*` | Linux VM, Docker |
+| Ingest API | Authenticate uploads, stream to spool, enqueue `ingest.job` | Linux VM, Docker |
+| Ingest worker | Claim jobs, parse/validate/load, update job and spool | Linux VM, Docker |
+| Migrate | Create/update roles and apply `db/migrations` | Linux VM, Docker (one-shot) |
+| PostgreSQL | Durable store, deduplication keys, queue, audit trail | Linux VM, Docker |
+| Read API | Read-only REST access with local/UTC time handling | Linux VM, Docker |
+| Consumers | Dashboards and analysts using the read API | Internal network |
 
 ## 5. Data flow
 
-1. A new `.xle` export lands in the OneDrive folder.
-2. The scheduled ingester scans for files that are complete and not yet imported.
-3. Each file is parsed into logger metadata, channel metadata, and timestamped readings.
-4. Validation classifies the file as imported, warning, empty, error, or
+1. A new `.xle` export lands in the OneDrive folder on Windows.
+2. An operator runs the uploader, which scans for files that are complete, past the settle
+   window, and not already known by SHA-256.
+3. The uploader sends `POST /ingest/v1/uploads` with a bearer token. The ingest API
+   streams the body into a spool volume, enforces the size limit and the
+   `</Body_xle>` completeness marker, and inserts a row in `ingest.job`.
+4. The single worker claims a queued job with `SELECT ... FOR UPDATE SKIP LOCKED`, reads
+   the spooled file, and runs the existing parser/validator/loader.
+5. Each file is parsed into logger metadata, channel metadata, and timestamped readings.
+6. Validation classifies the file as imported, warning, empty, error, or
    skipped_compensated (compensated files are audited but contribute no readings).
-5. The `import_file` audit row is inserted first, then readings are staged and upserted
+7. The `import_file` audit row is inserted first, then readings are staged and upserted
    into `transducer.reading`, keyed by `(series_id, ts)`. Overlapping downloads are
    resolved in favor of the newest download.
-6. The file's final parsed count and status are recorded in `transducer.import_file`.
-7. Consumers read through the API or the read-only Postgres role.
+8. The job records the final status and `file_id`; the spool file moves to
+   `processed/` or `failed/`.
+9. Consumers read through the read API with their own bearer token.
 
 ## 6. Deployment topology
 
 ### Linux VM
 
 - Docker Engine + Compose.
-- `db` container: PostgreSQL 16 with a named volume; `db/init` creates the schema,
-  roles, views, and grants on first start. Authentication is SCRAM-only.
-- `api` container: FastAPI, read-only DB role.
-- Firewall exposes 5432 and 8000 only to the internal subnet.
-- Nightly `pg_dump` to a network share.
+- `db`: PostgreSQL 16 with a named volume. `db/init` creates the schema, roles, views,
+  grants, and `ingest` queue on first start. Authentication is SCRAM-only. No published
+  port.
+- `migrate`: one-shot runner that creates/updates application roles and applies
+  `db/migrations`. It runs on every `up` and is idempotent.
+- `ingest-api`: FastAPI upload endpoint using `transducer_upload`; reads and writes only
+  `ingest.job` and `ingest.worker_heartbeat`.
+- `ingest-worker`: single-writer queue worker using `transducer_ingest`; reuses
+  `parse_xle`, `validate`, and `load`.
+- `read-api`: FastAPI read-only service using `transducer_read`.
+- `caddy`: TLS terminator and path router. The only service with a published port.
+- Named volumes: `pgdata`, `spool`, `caddy_data`, `caddy_config`.
+- Internal Compose network `backend` with `internal: true`.
+- Nightly `pg_dump` to a network share (planned).
 
 ### Windows host
 
 - OneDrive syncs the export folder.
-- The ingester runs on a schedule (Task Scheduler) and connects to the VM over the LAN.
-- This avoids mounting OneDrive on Linux and keeps the writer close to the source.
+- The operator runs `scripts/upload_xle.ps1` manually.
+- The host holds only the ingest API URL and bearer token, never a database password.
 
-### Why the ingester is separate from the VM
+### Why ingestion moved onto the VM
 
-The source lives in OneDrive on Windows. Running the writer where the files already are
-removes the need for a OneDrive-on-Linux bridge. The VM only needs to accept database
-connections from the ingest host.
+Running the parser and loader on the VM keeps large reads, parsing, and bulk `COPY` on the
+same host as PostgreSQL. The Windows host only streams files over HTTPS. This also means
+the database is never published to the LAN and analysts never connect to PostgreSQL
+directly.
 
 ## 7. Technology choices
 
@@ -116,12 +143,16 @@ connections from the ingest host.
 |---|---|---|
 | Database | PostgreSQL 16 | Free, robust, strong concurrency, easy network access, good time-series support without extensions |
 | Packaging | Docker Compose | Reproducible deployment on the VM |
-| Ingester | Python 3.11+ | Good XML support, simple scheduling, easy testing |
+| Ingest API | FastAPI + Uvicorn | Typed endpoints, multipart uploads, easy auth dependency |
+| Queue | `ingest.job` table | Durable, transactional, no extra broker; `SKIP LOCKED` gives safe claiming |
+| Worker | Single Python process | Preserves the proven single-writer loader; simple failure recovery |
+| TLS | Caddy | Automatic HTTPS plumbing, simple reverse proxy, only published port |
+| Uploader | Python + `httpx` | Reuses hashing/scanning code; HTTPS and retries |
 | XML parsing | `defusedxml` / `lxml` | Safe parsing of external files |
 | DB driver | `psycopg` 3 | Fast bulk `COPY`, modern API |
-| API | FastAPI | Typed endpoints, OpenAPI docs, easy read-only surface |
+| Read API | FastAPI | Typed endpoints, OpenAPI docs, easy read-only surface |
 | Time zone handling | Postgres `AT TIME ZONE` | Correct local/UTC conversion at query time |
-| Scheduling | Windows Task Scheduler (ingest), cron/systemd (backup) | Uses existing platform tooling |
+| Migrations | Small SQL runner | Versioned, checksummed, no heavy dependency |
 
 No TimescaleDB extension is required at the current data volume (~113k unique samples,
 233,855 reading rows). A BRIN index on `ts` is sufficient. TimescaleDB can be added later
@@ -147,14 +178,18 @@ without schema changes.
 
 ## 9. Design principles
 
-1. **Idempotent ingestion.** Re-running the ingester must not create duplicates.
+1. **Idempotent ingestion.** Re-running the uploader or worker must not create duplicates.
 2. **Provenance.** Every reading points to the file that produced it.
 3. **Native resolution.** Never resample during ingest; aggregation belongs in views/queries.
 4. **Narrow series model.** One row per logger/channel/unit keeps 2- and 3-channel loggers,
    unit changes, and future compensated series unambiguous.
-5. **Write/read separation.** Only the ingester writes; consumers use a read-only role or API.
+5. **Write/read separation.** Only the worker writes domain data; consumers use the read
+   API with a read-only token.
 6. **Compensated-ready, not compensated-enabled.** `data_kind` allows a future compensated
    series to coexist with raw data without key collisions.
+7. **Least privilege by role.** Upload, worker, and read roles have disjoint grants.
+8. **One front door.** Only Caddy is reachable; everything else stays on an internal
+   network.
 
 ## 10. Non-goals
 
@@ -162,23 +197,28 @@ without schema changes.
 - No UI in this repository.
 - No public endpoints.
 - No streaming or event-driven ingest.
+- No direct SQL or published PostgreSQL port for analysts.
 
 ## 11. Assumptions and constraints
 
 - The OneDrive export folder is the authoritative source.
 - Files carry no timezone offset; timestamps are logger local time.
 - All sites share one timezone unless a per-location override is added.
-- The database is reachable only from the internal network.
+- The VM is reachable only from the internal network.
 - A Linux VM with Docker is available.
 - Data volume is small enough for a single Postgres instance.
+- TLS certificates are issued by an internal CA or mkcert and trusted by clients.
 
 ## 12. Known risks
 
 | Risk | Mitigation |
 |---|---|
-| Partial OneDrive sync | Only import files whose content ends with `</Body_xle>`; honor a settle-time delay |
-| File locked during download | Retry with backoff; skip and retry next run |
+| Partial OneDrive sync | Uploader only sends files whose content ends with `</Body_xle>` and honors a settle-time delay |
+| File locked during upload | Uploader retries transport errors; skip and retry next run |
 | Filename/header location mismatch | Store the header location and flag mismatches in `import_file` |
 | Logger moved mid-file | Header location may mislabel older rows; flag location changes per serial for review |
 | DST ambiguity in naive local time | Document the fall-back hour; conversion follows Postgres rules |
 | Source format drift | Parser is tolerant of both known generations; validation surfaces unknown shapes |
+| Worker dies mid-job | Stale locks are requeued after `WORKER_LOCK_TIMEOUT_SECONDS`; spool reconciliation handles orphans |
+| Token leakage | Per-client ingest tokens, per-analyst read tokens, TLS-only, rotation documented |
+| Certificate expiry | Internal CA/mkcert; monitor and rotate per `certs/README.md` |

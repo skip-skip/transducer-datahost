@@ -31,6 +31,9 @@
 - `series` identifies one channel of one logger in one unit for one data kind.
 - `reading` is the time-series fact table.
 - `import_file` is both the ingest audit trail and the provenance anchor for readings.
+- `ingest.job` is the durable upload/processing queue; it references `import_file` once a
+  job completes. It lives in a separate `ingest` schema so the upload role never touches
+  domain tables.
 
 ## 2. Tables
 
@@ -106,7 +109,57 @@ Unique key: `(serial_number, channel_no, identification, unit, data_kind)`.
 
 Primary key: `(series_id, ts)`.
 
-## 3. Design notes
+## 3. Operational `ingest` schema
+
+The `ingest` schema is intentionally separate from the `transducer` domain schema. It is
+owned by the admin role and granted only to `transducer_upload` and `transducer_ingest`;
+`transducer_read` has no access.
+
+### `ingest.job`
+
+Durable queue for uploaded files. The upload API inserts a row; the worker claims it with
+`SELECT ... FOR UPDATE SKIP LOCKED`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `job_id` | `bigint` identity PK | |
+| `sha256` | `char(64)` UNIQUE | Content hash; one job per file content |
+| `filename` | `text` | Sanitized original filename |
+| `byte_size` | `bigint` | Bytes written to the spool |
+| `source_client` | `text` | Bearer-token label (or `recovered`) |
+| `source_ip` | `inet` | Client address, when available |
+| `status` | `text` | `queued`, `processing`, `done`, `failed` |
+| `import_status` | `text` | Final `import_file.status`, when done |
+| `file_id` | `bigint` FK → `import_file` | Set when the loader writes an audit row |
+| `attempt_count` | `integer` | Incremented on each claim |
+| `next_attempt_at` | `timestamptz` | Backoff gate for retries |
+| `locked_at` | `timestamptz` | Claim time; stale locks are requeued |
+| `received_at` | `timestamptz` | Default `now()` |
+| `started_at` | `timestamptz` | First claim time |
+| `finished_at` | `timestamptz` | Terminal time |
+| `error` | `text` | Last error, when failed or retrying |
+
+Constraints enforce a lowercase 64-hex `sha256`, a non-blank filename, a positive byte
+size, non-negative attempts, and the allowed status values.
+
+### `ingest.worker_heartbeat`
+
+One row per running worker. The worker updates `last_seen` while polling. `/health` and the
+Compose healthcheck report `degraded`/unhealthy when the heartbeat is older than
+`WORKER_HEARTBEAT_TIMEOUT_SECONDS`.
+
+| Column | Type | Notes |
+|---|---|---|
+| `worker_id` | `text` PK | Hostname + PID, or `WORKER_ID` |
+| `last_seen` | `timestamptz` | Updated on every claim attempt |
+
+### `ingest.file_known(text)`
+
+`SECURITY DEFINER` function returning a boolean: whether the hash already exists in
+`transducer.import_file`. It lets `transducer_upload` answer `HEAD /v1/files/{sha}`
+without `SELECT` on `import_file` and cannot expose row contents.
+
+## 4. Design notes
 
 ### Narrow `reading` instead of a wide table
 
@@ -143,7 +196,7 @@ Compensated exports reuse the same serial and channels but carry different value
 `series_id`, so `(series_id, ts)` never collides with raw data. v1 writes only
 `uncompensated`.
 
-## 4. Indexes
+## 5. Indexes
 
 | Index | Purpose |
 |---|---|
@@ -154,8 +207,12 @@ Compensated exports reuse the same serial and channels but carry different value
 | `import_file` on `(serial_number, download_time)` | Per-logger audit and priority |
 | `import_file` on `location_id` | Location joins and FK maintenance |
 | `series` UNIQUE on identity | Idempotent series creation |
+| `ingest.job` UNIQUE on `sha256` | One job per file content |
+| `ingest.job` on `(status, next_attempt_at, job_id)` | Queue claim and backoff |
+| `ingest.job` on `received_at DESC` | Recent-job listing |
+| `ingest.job` on `file_id` | Join to `import_file` |
 
-## 5. Views
+## 6. Views
 
 The read role queries curated views instead of `import_file`:
 
@@ -168,7 +225,7 @@ The read role queries curated views instead of `import_file`:
 The views are owned by the admin role, so the read role does not need direct access to
 `import_file` (and does not have it).
 
-## 6. Estimated volume
+## 7. Estimated volume
 
 | Measure | Value |
 |---|---|
@@ -178,7 +235,7 @@ The views are owned by the admin role, so the read role does not need direct acc
 | Series readings `(serial, channel, ts)` | 233,855 |
 | Estimated database size | Well under 100 MB |
 
-## 7. Example queries (illustrative)
+## 8. Example queries (illustrative)
 
 Latest level per logger:
 
@@ -201,7 +258,7 @@ WHERE v.serial_number = '1096042'
 ORDER BY v.ts;
 ```
 
-## 8. Compensated extension (future)
+## 9. Compensated extension (future)
 
 - Ingest compensated files with `data_kind = 'compensated'`.
 - Series are created separately by the extended unique key.

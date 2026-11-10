@@ -3,6 +3,15 @@
 .env.*
 !.env.example
 
+# TLS material (see certs/README.md)
+certs/*
+!certs/README.md
+*.pem
+*.key
+*.crt
+*.p12
+*.pfx
+
 # Source exports (large, site data; never commit)
 OneDrive_*/
 OneDrive_*.zip

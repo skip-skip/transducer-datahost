@@ -16,20 +16,43 @@
 
 The parser must not assume indentation, field presence, channel count, or a fixed interval.
 
-## 2. File selection
+## 2. Ingestion architecture
 
-A file is eligible when all of the following are true:
+The parser and loader run on the VM next to PostgreSQL. The Windows host only moves files
+over HTTPS.
+
+```
+Windows uploader                 VM
+-----------------                ------------------------------------------
+scan / settle / hash  --HTTPS--> Caddy :8443 -> ingest API (upload role)
+HEAD /v1/files/{sha}                 |  stream to spool
+POST /v1/uploads                     |  insert ingest.job
+                                     v
+                                  ingest worker (ingest role)
+                                     |  claim with FOR UPDATE SKIP LOCKED
+                                     |  parse / validate / load
+                                     v
+                                  PostgreSQL: transducer + ingest
+```
+
+The upload API never parses the file. It enforces the size limit and the
+`</Body_xle>` completeness marker, stores the file under its SHA-256 in the spool, and
+enqueues a job. Parsing, compensation detection, validation, and loading happen in the
+worker.
+
+## 3. Upload selection
+
+A file is eligible for upload when all of the following are true:
 
 1. Extension is `.xle` (case-insensitive).
-2. The body does **not** contain a `<Compensation_info>` block. This metadata block is the
-   authoritative compensated-data marker and separates all 46 compensated files from all
-   101 uncompensated files in the current export.
-3. Content is complete: the final non-whitespace text ends with `</Body_xle>`.
-4. The file's last-write time is older than `INGEST_SETTLE_SECONDS` (default 120s), to
+2. Content is complete: the final non-whitespace text ends with `</Body_xle>`.
+3. The file's last-write time is older than `INGEST_SETTLE_SECONDS` (default 120s), to
    avoid reading a file mid-sync.
-5. Its SHA-256 is not already present in `import_file`.
+4. Its SHA-256 is not already known to the API (`HEAD /v1/files/{sha}` returns 404).
 
-The `.zip` archive is ignored. Subdirectories are scanned recursively.
+The `.zip` archive is ignored. Subdirectories are scanned recursively. Compensated files
+are still uploaded: the worker records them as `skipped_compensated` audit rows, which
+keeps the provenance complete.
 
 ### Compensation detection
 
@@ -51,7 +74,7 @@ and some aquifer-test compensated files reach `ch1` ≈ 28. One uncompensated fi
 positives. `Created_by` is also not a discriminator: compensated files use `Version 4.6.3`
 or `Version 4.7.0`, and 20 uncompensated files also use `Version 4.7.0`.
 
-## 3. Parse steps
+## 4. Parse steps
 
 1. Read bytes; decode as UTF-8, falling back to Windows-1252 for older exports. UTF-8 is
    tried first because cp1252 accepts every byte sequence and would silently mis-decode a
@@ -68,7 +91,7 @@ or `Version 4.7.0`, and 20 uncompensated files also use `Version 4.7.0`.
    - one `series` per channel,
    - one reading per `(series, timestamp)`.
 
-## 4. Validation matrix
+## 5. Validation matrix
 
 | Check | Severity | Action |
 |---|---|---|
@@ -83,7 +106,7 @@ or `Version 4.7.0`, and 20 uncompensated files also use `Version 4.7.0`.
 | Duplicate `(series, ts)` within one file | Warning | Keep last occurrence; note count |
 | Unknown channel count or unit | Warning | Import what is known; note in `error` |
 | Blank channel identification or unit | Fatal | `status = error`, no readings |
-| `<Compensation_info>` present | Skip | Not eligible in v1 |
+| `<Compensation_info>` present | Skip | `status = skipped_compensated`, no readings |
 | Filename/metadata compensation mismatch | Warning | Metadata wins; note in `error` |
 | SHA-256 already imported | Skip | `status = skipped_duplicate` |
 
@@ -91,14 +114,18 @@ Rationale: header fields are frequently unreliable in this export (12 files have
 `Stop_time < Start_time`), but their log data is still valid. Only reject when the data
 itself cannot be read.
 
-## 5. Identity and deduplication
+## 6. Identity and deduplication
 
 ### File level
 
-- `sha256` is unique in `import_file`. Exact copies (`- Copy`, `(2)`, `(3)`, `_jh`,
-  `REFERENCE BARO_` prefix) are skipped after the first import.
-- A duplicate `sha256` is **report-only**: the file is counted and listed in the run
-  summary, but no second audit row is written. On the current export this skips 29
+- `sha256` is unique in `import_file` and in `ingest.job`. Exact copies (`- Copy`, `(2)`,
+  `(3)`, `_jh`, `REFERENCE BARO_` prefix) are skipped after the first import.
+- The uploader asks `HEAD /v1/files/{sha}` before sending a file, so an already-imported
+  file never transfers again.
+- A duplicate that races past the `HEAD` check returns the existing job with HTTP 200 and
+  does not create a second job.
+- A duplicate `sha256` is **report-only** at the loader: the file is counted and listed in
+  the run summary, but no second audit row is written. On the current export this skips 29
   byte-identical files (28 uncompensated, 1 compensated) and leaves 118 `import_file` rows
   on a fresh full load.
 - 31 of the 101 uncompensated files are fully redundant in the current export when files are
@@ -127,7 +154,7 @@ WHERE EXCLUDED.file_id > transducer.reading.file_id;
 Because `file_id` increases with processing order, an older file re-imported later cannot
 overwrite newer data. A re-run of the same export inserts zero rows.
 
-## 6. Load strategy
+## 7. Load strategy
 
 1. Parse the file fully in memory (largest file is ~3.8 MB, so this is safe).
 2. Begin a transaction.
@@ -149,7 +176,11 @@ the whole thing back at the end, so the reported new/overlap counts are exact wi
 leaving persistent changes. `--since <date>` filters on the header `<File_info>` download
 time before loading; files without a download time use their modification time.
 
-## 7. Status model
+The worker calls `load_one()` for a single spooled file. Parse/validation failures still
+write an `import_file` audit row. Transient database failures are recorded only in
+`ingest.job`, so the file can be retried without a misleading `import_file` row.
+
+## 8. Status model
 
 | Status | Meaning |
 |---|---|
@@ -164,7 +195,10 @@ time before loading; files without a download time use their modification time.
 Compensated files appear as `skipped_compensated` rows with `data_kind = 'compensated'`
 and `parsed_log = 0`.
 
-## 8. Dry-run report
+The queue has its own lifecycle: `queued` → `processing` → `done`/`failed`. A job's
+`import_status` mirrors the final `import_file.status`.
+
+## 9. Dry-run report
 
 `ingest --dry-run` prints, without writing:
 
@@ -196,42 +230,125 @@ files (one of which is also empty) and 1 malformed XML file. The pure location-m
 warning is counted among the 12 loader warning files but is reported separately by the
 Phase 2 report.
 
-## 9. Scheduling
+## 10. Ingest gateway
 
-- **v1:** Windows Task Scheduler on the host where OneDrive syncs, running
-  `scripts/run_ingest.ps1` (for example, every 6 hours).
-- The task runs the CLI against the export folder and logs to a rolling file.
-- Overlapping runs are prevented with a mutex/lock file.
-- A failed run leaves previously imported data intact and retries the same files next run.
+### Spool
 
-## 10. Failure handling
+The spool is a named volume mounted at `SPOOL_DIR` in both `ingest-api` and
+`ingest-worker`:
+
+| Directory | Contents |
+|---|---|
+| `incoming/` | Uploads being streamed; removed on failure |
+| `queued/` | Complete files named `<sha256>.xle`, waiting for the worker |
+| `processed/` | Successfully loaded files, retained for `SPOOL_PROCESSED_RETENTION_DAYS` (30) |
+| `failed/` | Terminal failures, retained for `SPOOL_FAILED_RETENTION_DAYS` (90) |
+
+Files are content-addressed by SHA-256, so a retry or duplicate cannot overwrite another
+file's bytes. The worker reconciles spool and queue on startup: queued files without a job
+are enqueued, and jobs without a queued file are completed or failed.
+
+### Queue
+
+`ingest.job` is the durable queue. Key behavior:
+
+- The upload API inserts a job with `status = 'queued'`.
+- The worker claims one job at a time with
+  `SELECT ... FOR UPDATE SKIP LOCKED`, setting `status = 'processing'`, `locked_at`, and
+  incrementing `attempt_count`.
+- On success it records `import_status`, `file_id`, and `finished_at`.
+- On a transient failure it requeues with exponential backoff until
+  `WORKER_MAX_ATTEMPTS` (default 3), then marks the job `failed`.
+- A lock older than `WORKER_LOCK_TIMEOUT_SECONDS` (default 600) is requeued on worker start.
+- The worker writes `ingest.worker_heartbeat` on every poll; `/health` reports `degraded`
+  and Compose marks the worker unhealthy when the heartbeat is stale.
+
+### API endpoints
+
+The ingest API is reachable at `https://<INGEST_HOSTNAME>:8443/ingest`:
+
+| Method | Path | Purpose |
+|---|---|---|
+| POST | `/v1/uploads` | Upload a file; returns the job |
+| HEAD | `/v1/files/{sha256}` | 204 if the hash is known, 404 otherwise |
+| GET | `/v1/uploads/{job_id}` | Job status |
+| GET | `/v1/uploads` | List jobs, optional `status` filter |
+| POST | `/v1/uploads/{job_id}/retry` | Requeue a failed job |
+| GET | `/health` | Database, spool, and worker heartbeat |
+
+All endpoints except `/health` require a bearer token.
+
+## 11. Manual upload workflow (v1)
+
+On the Windows host:
+
+```powershell
+$env:INGEST_API_TOKEN = "<token from INGEST_API_TOKENS>"
+$env:INGEST_API_URL = "https://transducer.internal:8443/ingest"
+
+.\scripts\upload_xle.ps1 -Source "C:\path\to\OneDrive_1_11-9-2026"
+```
+
+The wrapper:
+
+- Acquires a machine-wide mutex so uploads cannot overlap.
+- Appends timestamped output to `logs/upload-yyyyMMdd.log`.
+- Delegates scanning, settle/completeness checks, hashing, `HEAD`, upload, retries, and
+  optional waiting to `transducer-ingest upload`.
+
+Useful options:
+
+```powershell
+# Enqueue only, do not wait for the worker
+.\scripts\upload_xle.ps1 -Source "C:\path\to\export" -NoWait
+
+# Use a private CA bundle for the internal certificate
+.\scripts\upload_xle.ps1 -Source "C:\path\to\export" -Ca "C:\certs\rootCA.pem"
+
+# Override the API and token for one run
+.\scripts\upload_xle.ps1 -Source "C:\path\to\export" `
+    -Api "https://transducer.internal:8443/ingest" -Token "<token>"
+```
+
+By default the uploader waits for each job and reports the final `import_status`. Files
+newer than `INGEST_SETTLE_SECONDS` (120) or missing `</Body_xle>` are skipped. Transient
+HTTP 429/5xx and transport errors are retried with backoff; a 401 aborts immediately.
+
+Uploads are manual in v1. There is no Task Scheduler job.
+
+## 12. Failure handling
 
 | Failure | Behavior |
 |---|---|
-| Database unavailable | Abort run; no partial file commits |
-| File locked by OneDrive | Skip; retry next run |
-| Partial file | Skip (completeness check); retry next run |
-| Malformed XML | Record `error`; continue with other files |
+| Database unavailable | Health reports unavailable; worker retries; uploads may still spool |
+| Upload interrupted | Partial file removed from `incoming/`; retry the upload |
+| File locked by OneDrive | Uploader reports the error; retry next run |
+| Partial file | Skipped by the uploader or rejected by the API; retry next run |
+| Malformed XML | Worker records `import_file.status = 'error'`; job finishes |
 | Duplicate series definition | Reuse existing series |
-| Disk full on VM | Ingest fails cleanly; alert via monitoring |
+| Worker crashes mid-job | Stale lock requeued after the timeout; spool reconciled on restart |
+| Disk full on VM | Health reports the spool unavailable; ingest fails cleanly; alert |
+| Token rejected | Uploader exits non-zero with a 401 message; fix or rotate the token |
 
-## 11. Backfill procedure
+## 13. Backfill procedure
 
-1. Run `ingest --dry-run` and reconcile against the expected table above.
-2. Run `ingest` for the full export.
-3. Verify `import_file` counts by status and `reading` count.
-4. Re-run `ingest`; confirm zero new rows.
-5. Review the 13 anomalous files and the 2 location mismatches.
+1. Start the stack and run `db/tests/run_phase1.sh`.
+2. Run `python -m transducer_ingest.report --source <folder> --check` locally to confirm
+   the parser totals.
+3. Upload the full export with `upload_xle.ps1` (wait for jobs).
+4. Verify `import_file` counts by status, `reading` count, and `ingest.job` outcomes.
+5. Re-run the uploader; confirm zero new uploads and zero new rows.
+6. Review the 13 anomalous files and the 2 location mismatches.
 
-## 12. CLI contract
+## 14. CLI contract
 
-The database-free report (Phase 2):
+The database-free report:
 
 ```
 python -m transducer_ingest.report --source <folder> [--json] [--check] [--all]
 ```
 
-The database loader (Phase 3), also reachable through the installed
+The database loader (development/direct use), also reachable through the installed
 `transducer-ingest` entry point:
 
 ```
@@ -239,13 +356,23 @@ python -m transducer_ingest.cli ingest --source <folder> [--dry-run] [--since <d
 python -m transducer_ingest.cli report --source <folder> [--json] [--check] [--all]
 ```
 
+The manual HTTPS uploader:
+
+```
+python -m transducer_ingest.cli upload --source <folder> --api <url> \
+    [--token <token>] [--ca <bundle>] [--settle-seconds N] \
+    [--wait|--no-wait] [--timeout S] [--wait-timeout S] [--retries N] \
+    [--client-name NAME] [--json] [--all]
+```
+
 `--dry-run` rolls back at the end; `--since` filters on header download time; `--json` emits
 the summary as JSON; `--all` lists every per-file result. The `report` subcommand delegates
 to the database-free Phase 2 report, and the loader/`psycopg` imports are lazy, so the
 report still runs without a database driver installed.
 
-Configuration comes from environment variables (`POSTGRES_HOST`, `POSTGRES_PORT`,
-`POSTGRES_DB`, `INGEST_USER`, `INGEST_PASSWORD`, `SITE_TIMEZONE`,
-`INGEST_SETTLE_SECONDS`). The loader authenticates with the least-privilege ingest role,
-so it does not use the admin `POSTGRES_USER` / `POSTGRES_PASSWORD`. Passwords are never
-accepted as command-line arguments in scheduled runs.
+The direct loader reads `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `INGEST_USER`,
+`INGEST_PASSWORD`, `SITE_TIMEZONE`, and `INGEST_SETTLE_SECONDS`. The uploader reads
+`INGEST_API_URL`, `INGEST_API_TOKEN`, `INGEST_CA_CERT` (optional), and
+`INGEST_SETTLE_SECONDS`. The services read
+`UPLOAD_*`, `INGEST_*`, `READ_*`, token lists, and the worker/spool limits documented in
+`.env.example`. Passwords are never accepted as command-line arguments in scheduled runs.

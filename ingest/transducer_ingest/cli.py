@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict
 from pathlib import Path
@@ -83,6 +84,69 @@ def build_parser() -> argparse.ArgumentParser:
         help="Show every file and every redundant filename",
     )
 
+    upload = subparsers.add_parser(
+        "upload",
+        help="Upload .xle files to the VM-hosted ingest API (HTTPS)",
+    )
+    upload.add_argument(
+        "--source",
+        type=Path,
+        required=True,
+        help="Folder to scan recursively for .xle files",
+    )
+    upload.add_argument(
+        "--api",
+        default=os.environ.get("INGEST_API_URL"),
+        help="API base URL, for example https://transducer.internal:8443/ingest",
+    )
+    upload.add_argument(
+        "--ca",
+        default=os.environ.get("INGEST_CA_CERT") or None,
+        help="Path to the CA certificate used to verify the API (optional)",
+    )
+    upload.add_argument(
+        "--token",
+        help="Bearer token. Prefer INGEST_API_TOKEN or the interactive prompt.",
+    )
+    upload.add_argument(
+        "--settle-seconds",
+        type=int,
+        default=None,
+        help="Skip files modified within this many seconds (default: env or 120)",
+    )
+    upload.add_argument(
+        "--wait",
+        dest="wait",
+        action="store_true",
+        default=True,
+        help="Wait for each job to finish (default)",
+    )
+    upload.add_argument(
+        "--no-wait",
+        dest="wait",
+        action="store_false",
+        help="Enqueue only and return immediately",
+    )
+    upload.add_argument("--timeout", type=float, default=60.0, help="HTTP timeout")
+    upload.add_argument(
+        "--wait-timeout",
+        type=float,
+        default=300.0,
+        help="Maximum seconds to wait for a job",
+    )
+    upload.add_argument("--retries", type=int, default=3, help="Retries for 429/5xx")
+    upload.add_argument(
+        "--client-name",
+        default="",
+        help="Label sent with uploads (default: hostname)",
+    )
+    upload.add_argument("--json", action="store_true", help="Emit the summary as JSON")
+    upload.add_argument(
+        "--all",
+        action="store_true",
+        help="Show every file result",
+    )
+
     return parser
 
 
@@ -101,7 +165,54 @@ def main(argv: list[str] | None = None) -> int:
             report_argv.append("--all")
         return report_module.main(report_argv)
 
+    if args.command == "upload":
+        return _run_upload(args)
+
     return _run_ingest(args)
+
+
+def _run_upload(args: argparse.Namespace) -> int:
+    if not args.api:
+        print(
+            "--api or INGEST_API_URL is required (for example "
+            "https://transducer.internal:8443/ingest)",
+            file=sys.stderr,
+        )
+        return 2
+    if not args.source.is_dir():
+        print(f"source folder not found: {args.source}", file=sys.stderr)
+        return 2
+
+    from .upload import UploadOptions, resolve_token
+    from .upload import main as upload_main
+
+    settle_seconds = args.settle_seconds
+    if settle_seconds is None:
+        try:
+            settle_seconds = int(os.environ.get("INGEST_SETTLE_SECONDS", "120"))
+        except ValueError:
+            print("INGEST_SETTLE_SECONDS must be an integer", file=sys.stderr)
+            return 2
+
+    try:
+        token = resolve_token(args.token)
+    except SystemExit as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+
+    options = UploadOptions(
+        source=args.source,
+        api=args.api,
+        token=token,
+        ca=args.ca,
+        settle_seconds=settle_seconds,
+        wait=args.wait,
+        timeout=args.timeout,
+        wait_timeout=args.wait_timeout,
+        retries=args.retries,
+        client_name=args.client_name,
+    )
+    return upload_main(options, show_json=args.json, show_all=args.all)
 
 
 def _run_ingest(args: argparse.Namespace) -> int:

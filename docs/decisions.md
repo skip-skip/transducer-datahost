@@ -23,20 +23,24 @@ access from internal dashboards and analysts, durable storage, and straightforwa
 
 ---
 
-## ADR-002: Host the database on a new Linux VM
+## ADR-002: Host the database and ingestion on a dedicated Linux VM
 
-**Status:** Accepted
+**Status:** Accepted (amended by ADR-019)
 
 **Context:** The database must be reachable on the internal network and independent of any
-individual workstation.
+individual workstation. Parsing and loading large files is cheaper next to the database
+than across the LAN.
 
-**Decision:** Provision a dedicated Linux VM for Postgres, the API, and backups.
+**Decision:** Provision a dedicated Linux VM for PostgreSQL, the ingest gateway, the read
+API, and backups. The Windows host keeps the OneDrive folder and runs only the HTTPS
+uploader.
 
 **Consequences:**
 
 - Stable address and uptime; workstation reboots do not affect consumers.
-- The ingester still runs on the Windows host where OneDrive syncs.
-- Requires VM provisioning, patching, and firewall changes by IT.
+- PostgreSQL is never published; all access goes through Caddy and the APIs.
+- Requires VM provisioning, patching, certificate management, and firewall changes by IT.
+- The Windows host no longer needs a database credential.
 
 ---
 
@@ -142,38 +146,42 @@ heavily. Values for the same timestamp can occasionally differ between downloads
 
 ## ADR-008: Read-only FastAPI service
 
-**Status:** Accepted
+**Status:** Accepted (amended by ADR-023)
 
 **Context:** Dashboards should not hold database credentials, and consumers need local/UTC
-time options.
+time options. Analysts should not connect to PostgreSQL directly.
 
 **Decision:** Provide a read-only FastAPI service over the `transducer_read` role, exposing
-logger/location/series/readings/imports endpoints. Dashboards use HTTP; analysts may use
-SQL with the read-only role.
+logger/location/series/readings/imports endpoints. All consumers use HTTP with a bearer
+token; PostgreSQL is not published.
 
 **Consequences:**
 
 - Credentials stay server-side; CORS and pagination are centralized.
 - API becomes another service to deploy, monitor, and back up.
-- Postgres remains directly available to analysts for ad hoc work.
+- Analysts no longer get ad hoc SQL; new questions are answered by extending the API.
+- A separate ingest API shares the same TLS front door but has its own tokens and role.
 
 ---
 
 ## ADR-009: Run the ingester on the Windows host
 
-**Status:** Accepted
+**Status:** Superseded by ADR-019
 
 **Context:** The authoritative source is a OneDrive folder on Windows. Running Python on
 Linux would require syncing or mounting OneDrive.
 
-**Decision:** Run the Python ingester on the Windows host where OneDrive syncs, connecting
-to Postgres on the VM over the LAN. Schedule with Task Scheduler.
+**Decision (historical):** Run the Python ingester on the Windows host where OneDrive
+syncs, connecting to Postgres on the VM over the LAN. Schedule with Task Scheduler.
 
 **Consequences:**
 
 - No OneDrive-on-Linux bridge required.
 - The writer depends on the Windows host being powered on for scheduled runs.
 - Only the write role's credentials live on the Windows host.
+
+This was replaced because it required publishing PostgreSQL and placed the write credential
+on a workstation. ADR-019 keeps OneDrive on Windows but moves parsing/loading to the VM.
 
 ---
 
@@ -197,22 +205,23 @@ compensated series will reuse serial/channel identities.
 
 ## ADR-011: Initialize with ordered SQL scripts and defer migrations
 
-**Status:** Accepted (Phase 1)
+**Status:** Superseded by ADR-022
 
 **Context:** The database is new and has no production data. The Postgres Docker image
 runs `/docker-entrypoint-initdb.d/*.sql` only when the data volume is empty. A migration
 tool adds process and dependencies before there is data worth preserving.
 
-**Decision:** Use four ordered init scripts (`01_roles.sql`, `02_schema.sql`,
-`03_views.sql`, `04_grants.sql`) for Phase 1. Re-initialize with
-`docker compose down -v` while the data is disposable. Adopt a versioned migration tool
-before loading production data or making a schema change that must preserve data.
+**Decision (historical):** Use ordered init scripts (`01_roles.sql`, `02_schema.sql`,
+`03_views.sql`, `04_grants.sql`) for Phase 1. Re-initialize with `docker compose down -v`
+while the data is disposable. Adopt a versioned migration tool before loading production
+data or making a schema change that must preserve data.
 
 **Consequences:**
 
 - Simple, reproducible first boot with no migration bookkeeping.
 - `down -v` destroys the database; it is only acceptable before production data exists.
-- Future schema changes require a real migration path; this ADR will be superseded.
+- Future schema changes require a real migration path; this ADR was superseded before
+  production data was loaded.
 
 ---
 
@@ -370,3 +379,111 @@ processes. The acceptance script still accepts the legacy `PG*` names as fallbac
   `PGPASSWORD` or a connection string; this is a client requirement, not a repository one.
 - `db/tests/run_phase1.sh` runs the acceptance checks inside the Compose database service,
   so the host does not need `psql` or a sourced `.env`.
+
+---
+
+## ADR-019: Move the parser and loader onto the VM behind an upload API
+
+**Status:** Accepted (Phase 4)
+
+**Context:** The Windows ingester required a published PostgreSQL port and put the write
+credential on a workstation. It also pulled each file over the LAN only to parse it and
+push rows back. The source folder must stay on Windows because OneDrive syncs there.
+
+**Decision:** Keep OneDrive on the Windows host and add a small HTTPS uploader. The upload
+API, queue worker, parser, loader, and PostgreSQL all run on the VM. The uploader sends
+files with a bearer token and never receives a database credential. Uploads are manual in
+v1; Task Scheduler is not used.
+
+**Consequences:**
+
+- PostgreSQL is not published; the VM exposes only Caddy on 8443.
+- Parsing and bulk `COPY` stay on the same host as the database.
+- The Windows host holds only an ingest API URL and token.
+- Uploads depend on an operator running the script (accepted for v1).
+- The ingest API and worker are additional services to monitor.
+
+---
+
+## ADR-020: TLS plus static bearer tokens, no mTLS
+
+**Status:** Accepted (Phase 4)
+
+**Context:** The upload and read APIs need authentication over the internal network without
+requiring client certificates on every Windows workstation.
+
+**Decision:** Caddy terminates TLS with a certificate for `INGEST_HOSTNAME`. Both APIs
+require static bearer tokens configured as comma-separated `label:token` pairs. The token
+label is recorded for audit. Tokens are compared with `secrets.compare_digest`.
+
+**Consequences:**
+
+- Simple client setup: one token per upload client or analyst, revocable independently.
+- TLS is mandatory; there is no plaintext listener.
+- Tokens are shared secrets, so distribution and rotation need care.
+- mTLS remains an option later without changing the API surface.
+
+---
+
+## ADR-021: Use `ingest.job` as a Postgres-backed queue
+
+**Status:** Accepted (Phase 4)
+
+**Context:** Uploads arrive faster than the single writer should process them, and a worker
+crash must not lose an accepted file. Adding a broker (Redis, RabbitMQ) increases
+operational surface.
+
+**Decision:** Store jobs in `ingest.job` and claim them with
+`SELECT ... FOR UPDATE SKIP LOCKED`. Keep the spool file under a content-addressed name and
+reconcile spool and queue on worker start. Record retries with `attempt_count`,
+`next_attempt_at`, and `locked_at`; requeue stale locks after a timeout.
+
+**Consequences:**
+
+- No extra infrastructure; jobs and domain writes share PostgreSQL durability.
+- A single worker preserves the proven single-writer loader.
+- Queue state is queryable for operations and the uploader's wait loop.
+- High throughput would eventually need multiple workers or a broker; not a v1 concern.
+
+---
+
+## ADR-022: Versioned SQL migrations plus a role reconciler
+
+**Status:** Accepted (Phase 4)
+
+**Context:** `db/init` only runs on an empty volume, but the new `ingest` schema and roles
+must also reach an existing database without `down -v`.
+
+**Decision:** Add `db/migrations/*.sql` applied by
+`transducer_ingest.service.migrate` in filename order. Each file runs in its own
+transaction and is recorded with a SHA-256 checksum in `public.schema_migrations`. The same
+runner creates or updates `transducer_upload`, `transducer_ingest`, and `transducer_read`
+from the environment. Compose runs it as a one-shot `migrate` service on every `up`.
+
+**Consequences:**
+
+- Existing volumes upgrade in place; editing an applied migration is rejected.
+- Role passwords can be rotated by rerunning `migrate` with new values.
+- The runner needs the admin password; only the one-shot service and operator use it.
+- `db/init` and `db/migrations` must be kept consistent for fresh installs and upgrades.
+
+---
+
+## ADR-023: Separate ingest and read APIs with distinct tokens
+
+**Status:** Accepted (Phase 4)
+
+**Context:** Upload clients and analysts have different trust levels and capabilities.
+Sharing one API or token list would let an upload client read data and complicate audit.
+
+**Decision:** Run two FastAPI services. The ingest API uses `transducer_upload` and
+`INGEST_API_TOKENS`; the read API uses `transducer_read` and `READ_API_TOKENS`. Caddy
+routes `/ingest/*` and `/api/*` to the respective services. Analysts use only the read API;
+PostgreSQL is not published.
+
+**Consequences:**
+
+- Capabilities and tokens are separated; a leaked upload token cannot read data.
+- Audit labels are meaningful per service.
+- Two services to deploy and monitor, but they share one TLS front door.
+- New analyst questions require extending the read API rather than ad hoc SQL.

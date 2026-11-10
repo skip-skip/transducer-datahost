@@ -1,0 +1,152 @@
+from datetime import datetime, timedelta
+from decimal import Decimal
+
+import pytest
+from fastapi import HTTPException
+from fastapi.testclient import TestClient
+
+from transducer_api.app import (
+    _jsonable,
+    _limit,
+    _parse_local_bound,
+    _window,
+    create_app,
+)
+from transducer_api.settings import ReadSettings
+
+
+class FakeCursor:
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+    def execute(self, *args, **kwargs):
+        return None
+
+    def fetchall(self):
+        return []
+
+
+class FakeConnection:
+    def cursor(self, row_factory=None):
+        return FakeCursor()
+
+    def execute(self, *args, **kwargs):
+        return None
+
+    def close(self):
+        return None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        return False
+
+
+class FakeDatabase:
+    def connect(self):
+        return FakeConnection()
+
+
+def make_settings() -> ReadSettings:
+    return ReadSettings(database=FakeDatabase(), tokens={"test": "token"})
+
+
+def test_parse_local_bound_naive() -> None:
+    assert _parse_local_bound("2026-01-15T12:00:00", "UTC") == datetime(
+        2026, 1, 15, 12, 0
+    )
+
+
+def test_parse_local_bound_converts_utc() -> None:
+    assert _parse_local_bound("2026-01-15T12:00:00Z", "UTC") == datetime(
+        2026, 1, 15, 12, 0
+    )
+
+
+def test_parse_local_bound_rejects_garbage() -> None:
+    with pytest.raises(HTTPException) as excinfo:
+        _parse_local_bound("not-a-date", "UTC")
+    assert excinfo.value.status_code == 400
+
+
+def test_window_enforces_limit() -> None:
+    start = datetime(2026, 1, 1)
+    _window(start, start + timedelta(days=31), 31)
+    with pytest.raises(HTTPException):
+        _window(start, start + timedelta(days=32), 31)
+    with pytest.raises(HTTPException):
+        _window(start, start - timedelta(days=1), 31)
+
+
+def test_limit_clamps_to_maximum() -> None:
+    assert _limit(5, 100) == 5
+    assert _limit(500, 100) == 100
+    with pytest.raises(HTTPException):
+        _limit(0, 100)
+
+
+def test_jsonable_serializes_database_types() -> None:
+    assert _jsonable(Decimal("1.25")) == 1.25
+    assert _jsonable(datetime(2026, 1, 15, 12, 0)) == "2026-01-15T12:00:00"
+
+
+def test_health_does_not_require_a_token() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "database": "ok"}
+
+
+def test_endpoints_require_a_bearer_token() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get("/loggers")
+
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_unauthenticated_request_does_not_open_a_database_connection() -> None:
+    class ExplodingDatabase:
+        def connect(self):
+            raise AssertionError("database connection opened before authentication")
+
+    settings = ReadSettings(database=ExplodingDatabase(), tokens={"test": "token"})
+    client = TestClient(create_app(settings))
+
+    response = client.get("/loggers")
+
+    assert response.status_code == 401
+
+
+def test_authenticated_request_reaches_the_database() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/loggers", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 200
+    assert response.json() == {"data": []}
+
+
+def test_readings_rejects_unknown_timezone() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/readings",
+        params={
+            "start": "2026-01-01",
+            "end": "2026-01-02",
+            "tz": "bogus",
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 400

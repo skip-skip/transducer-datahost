@@ -1,10 +1,25 @@
 # ---------------------------------------------------------------------------
-# The `db` service is runnable. The `api` and `ingest` services remain
-# commented out until their Dockerfiles and application code exist.
+# VM-hosted transducer data warehouse.
+#
+# Only Caddy publishes a port (8443). PostgreSQL, the ingest API, the worker,
+# and the read API stay on the internal Compose network. The parser and loader
+# run on the same VM as the database; the Windows uploader talks HTTPS only.
+#
+# First run:
+#   1. cp .env.example .env and fill in passwords and API tokens.
+#   2. Put server.crt/server.key in certs/ (see certs/README.md).
+#   3. docker compose up -d --build
+#   4. db/tests/run_phase1.sh
 #
 # Validate with:  docker compose config
 # ---------------------------------------------------------------------------
 name: transducer-dash
+
+x-database-env: &database-env
+  POSTGRES_HOST: db
+  POSTGRES_PORT: 5432
+  POSTGRES_DB: ${POSTGRES_DB:-transducer}
+  SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
 
 services:
   db:
@@ -15,22 +30,21 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-transducer}
       POSTGRES_USER: ${POSTGRES_USER:-transducer_admin}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
-      # The init scripts create these roles and fail fast if either password
-      # is missing. They are only read on the first initialization.
+      # The init scripts create these roles and fail fast if any password is
+      # missing. They are only read on the first initialization.
+      UPLOAD_PASSWORD: ${UPLOAD_PASSWORD:?set UPLOAD_PASSWORD in .env}
       INGEST_PASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
       READ_PASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
       # No trust entries: host and local connections both use SCRAM.
       POSTGRES_HOST_AUTH_METHOD: scram-sha-256
       POSTGRES_INITDB_ARGS: --auth-host=scram-sha-256 --auth-local=scram-sha-256
       TZ: ${SITE_TIMEZONE:-America/New_York}
-    ports:
-      # Bind to the internal interface in production; this file publishes on
-      # all interfaces for local testing only.
-      - "${POSTGRES_PORT:-5432}:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
       # SQL files placed here run only when the data volume is first created.
       - ./db/init:/docker-entrypoint-initdb.d:ro
+    networks:
+      - backend
     healthcheck:
       # Use TCP so the socket-only temporary server used during initialization
       # is not mistaken for a ready database.
@@ -42,43 +56,203 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    # Intentionally no published 5432. For local access use:
+    #   docker compose exec db psql -U transducer_admin -d transducer
 
-  # api:
-  #   build: ./api
-  #   container_name: transducer-api
-  #   restart: unless-stopped
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #   environment:
-  #     POSTGRES_HOST: db
-  #     POSTGRES_PORT: 5432
-  #     POSTGRES_DB: ${POSTGRES_DB:-transducer}
-  #     READ_USER: ${READ_USER:-transducer_read}
-  #     READ_PASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
-  #     SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
-  #     API_CORS_ORIGINS: ${API_CORS_ORIGINS:-}
-  #   ports:
-  #     - "${API_PORT:-8000}:8000"
+  # One-shot schema/role updater. It is safe on a fresh database (the init
+  # scripts already ran) and is the supported path for an existing volume.
+  migrate:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    container_name: transducer-migrate
+    restart: "no"
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      <<: *database-env
+      POSTGRES_USER: ${POSTGRES_USER:-transducer_admin}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      UPLOAD_USER: ${UPLOAD_USER:-transducer_upload}
+      UPLOAD_PASSWORD: ${UPLOAD_PASSWORD:?set UPLOAD_PASSWORD in .env}
+      INGEST_USER: ${INGEST_USER:-transducer_ingest}
+      INGEST_PASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
+      READ_USER: ${READ_USER:-transducer_read}
+      READ_PASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
+      MIGRATIONS_DIR: /app/db/migrations
+    command: ["python", "-m", "transducer_ingest.service.migrate"]
+    networks:
+      - backend
 
-  # ingest:
-  #   build: ./ingest
-  #   container_name: transducer-ingest
-  #   profiles: ["ingest"]
-  #   depends_on:
-  #     db:
-  #       condition: service_healthy
-  #   environment:
-  #     POSTGRES_HOST: db
-  #     POSTGRES_PORT: 5432
-  #     POSTGRES_DB: ${POSTGRES_DB:-transducer}
-  #     INGEST_USER: ${INGEST_USER:-transducer_ingest}
-  #     INGEST_PASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
-  #     SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
-  #   volumes:
-  #     # Mount a synced copy of the export folder read-only.
-  #     - ./data:/data:ro
-  #   command: ["python", "-m", "transducer_ingest.cli", "ingest", "--source", "/data"]
+  ingest-api:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    container_name: transducer-ingest-api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-env
+      UPLOAD_USER: ${UPLOAD_USER:-transducer_upload}
+      UPLOAD_PASSWORD: ${UPLOAD_PASSWORD:?set UPLOAD_PASSWORD in .env}
+      INGEST_API_TOKENS: ${INGEST_API_TOKENS:?set INGEST_API_TOKENS in .env}
+      SPOOL_DIR: /var/lib/transducer
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-10485760}
+      WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${WORKER_HEARTBEAT_TIMEOUT_SECONDS:-60}
+      INGEST_DOCS_ENABLED: ${INGEST_DOCS_ENABLED:-false}
+    volumes:
+      - spool:/var/lib/transducer
+    expose:
+      - "8080"
+    command:
+      [
+        "uvicorn",
+        "transducer_ingest.service.app:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+  ingest-worker:
+    build:
+      context: .
+      dockerfile: ingest/Dockerfile
+    container_name: transducer-ingest-worker
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-env
+      INGEST_USER: ${INGEST_USER:-transducer_ingest}
+      INGEST_PASSWORD: ${INGEST_PASSWORD:?set INGEST_PASSWORD in .env}
+      SPOOL_DIR: /var/lib/transducer
+      WORKER_POLL_SECONDS: ${WORKER_POLL_SECONDS:-2}
+      WORKER_LOCK_TIMEOUT_SECONDS: ${WORKER_LOCK_TIMEOUT_SECONDS:-600}
+      WORKER_MAX_ATTEMPTS: ${WORKER_MAX_ATTEMPTS:-3}
+      WORKER_BACKOFF_SECONDS: ${WORKER_BACKOFF_SECONDS:-30}
+      WORKER_HEARTBEAT_TIMEOUT_SECONDS: ${WORKER_HEARTBEAT_TIMEOUT_SECONDS:-60}
+      SPOOL_PROCESSED_RETENTION_DAYS: ${SPOOL_PROCESSED_RETENTION_DAYS:-30}
+      SPOOL_FAILED_RETENTION_DAYS: ${SPOOL_FAILED_RETENTION_DAYS:-90}
+    volumes:
+      - spool:/var/lib/transducer
+    command: ["python", "-m", "transducer_ingest.service.worker"]
+    healthcheck:
+      test: ["CMD", "python", "-m", "transducer_ingest.service.healthcheck"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+    networks:
+      - backend
+
+  read-api:
+    build:
+      context: .
+      dockerfile: api/Dockerfile
+    container_name: transducer-read-api
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    environment:
+      <<: *database-env
+      READ_USER: ${READ_USER:-transducer_read}
+      READ_PASSWORD: ${READ_PASSWORD:?set READ_PASSWORD in .env}
+      READ_API_TOKENS: ${READ_API_TOKENS:?set READ_API_TOKENS in .env}
+      READ_MAX_ROWS: ${READ_MAX_ROWS:-10000}
+      READ_MAX_WINDOW_DAYS: ${READ_MAX_WINDOW_DAYS:-31}
+      API_CORS_ORIGINS: ${API_CORS_ORIGINS:-}
+      API_DOCS_ENABLED: ${API_DOCS_ENABLED:-false}
+    expose:
+      - "8080"
+    command:
+      [
+        "uvicorn",
+        "transducer_api.app:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
+  caddy:
+    build: ./caddy
+    container_name: transducer-caddy
+    restart: unless-stopped
+    depends_on:
+      ingest-api:
+        condition: service_healthy
+      read-api:
+        condition: service_healthy
+    environment:
+      INGEST_HOSTNAME: ${INGEST_HOSTNAME:-transducer.internal}
+    ports:
+      - "${CADDY_HTTPS_PORT:-8443}:8443"
+    # Let the container resolve its own TLS name to loopback for the
+    # healthcheck.
+    extra_hosts:
+      - "${INGEST_HOSTNAME:-transducer.internal}:127.0.0.1"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/etc/caddy/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -fsSk -o /dev/null https://$$INGEST_HOSTNAME:8443/ingest/health || exit 1",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    networks:
+      - backend
 
 volumes:
   pgdata:
+  spool:
+  caddy_data:
+  caddy_config:
+
+networks:
+  # No route to the host or the internet. Only Caddy's published port is
+  # reachable from outside the Compose project.
+  backend:
+    internal: true

@@ -55,6 +55,8 @@ class FileLoadResult:
     duplicate_file: bool
     warnings: list[str] = field(default_factory=list)
     error: str | None = None
+    # The import_file row, including the existing row for a duplicate SHA.
+    file_id: int | None = None
 
 
 @dataclass
@@ -152,8 +154,15 @@ def load_export(
     *,
     dry_run: bool = False,
     site_timezone: str = DEFAULT_SITE_TIMEZONE,
+    record_failures: bool = True,
 ) -> LoadSummary:
-    """Load prepared files and return per-file and aggregate results."""
+    """Load prepared files and return per-file and aggregate results.
+
+    ``record_failures`` keeps the historical CLI behavior of writing a
+    best-effort ``import_file`` error row. The service worker calls
+    :func:`load_one` instead, because a transient database failure must be
+    retryable and must not leave a row that looks like a duplicate next time.
+    """
 
     results: list[FileLoadResult] = []
 
@@ -176,9 +185,32 @@ def load_export(
                     results.append(_load_file(conn, item, site_timezone))
             except Exception as exc:  # noqa: BLE001 - report and continue
                 results.append(_failure_result(item, exc))
-                _record_failure(conn, item, exc, site_timezone)
+                if record_failures:
+                    _record_failure(conn, item, exc, site_timezone)
 
     return _summarize(results, prepared, dry_run)
+
+
+def load_one(
+    conn: Connection,
+    path: Path,
+    *,
+    site_timezone: str = DEFAULT_SITE_TIMEZONE,
+) -> FileLoadResult:
+    """Parse, validate, and load a single file in its own transaction.
+
+    This is the service worker entry point. Parse/validation errors are
+    terminal and are recorded in ``import_file`` exactly as the CLI does. A
+    database or connection error is allowed to propagate so the worker can
+    retry without writing a blocking audit row.
+    """
+
+    prepared = prepare_files([path])
+    if not prepared:
+        raise ValueError(f"no loadable file at {path}")
+    item = prepared[0]
+    with conn.transaction():
+        return _load_file(conn, item, site_timezone)
 
 
 def _load_file(
@@ -194,7 +226,8 @@ def _load_file(
             "SELECT file_id FROM transducer.import_file WHERE sha256 = %s",
             (metadata.sha256,),
         )
-        if cur.fetchone() is not None:
+        existing = cur.fetchone()
+        if existing is not None:
             return FileLoadResult(
                 filename=metadata.filename,
                 status=Status.SKIPPED_DUPLICATE,
@@ -204,6 +237,7 @@ def _load_file(
                 overlapping_rows=0,
                 duplicate_file=True,
                 warnings=list(item.warnings),
+                file_id=existing[0],
             )
 
         if metadata.serial_number:
@@ -231,6 +265,7 @@ def _load_file(
                 duplicate_file=False,
                 warnings=list(item.warnings),
                 error=item.error,
+                file_id=file_id,
             )
 
         series_ids = _upsert_series(cur, metadata)
@@ -276,6 +311,7 @@ def _load_file(
         duplicate_file=False,
         warnings=list(item.warnings),
         error=item.error,
+        file_id=file_id,
     )
 
 

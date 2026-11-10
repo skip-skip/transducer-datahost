@@ -1,9 +1,9 @@
 # Roadmap and Acceptance Criteria
 
-The repository is currently at **Phase 3 (loader and deduplication)**. Phases 0–2 are
-complete. The Phase 1 SQL and acceptance script are implemented and verified against an
-embedded PostgreSQL 16.2, and Phase 3 has been verified against the same embedded server.
-Docker/Compose verification on the Linux VM is pending.
+The repository is currently at **Phase 4 (VM deployment) pending verification**. Phases 0–3
+and the application services are implemented and unit-tested locally. The Phase 1 SQL has
+been verified against an embedded PostgreSQL 16.2; Docker/Compose verification on the
+Linux VM, the TLS certificate, and the production backfill remain.
 
 ## Phase 0 — Documentation and skeleton (complete)
 
@@ -15,25 +15,31 @@ Docker/Compose verification on the Linux VM is pending.
 - [x] Repository directory skeleton and configuration templates
 - [x] Git repository initialized with a GitHub remote
 
-## Phase 1 — Schema and local database
+## Phase 1 — Schema and local database (complete locally)
 
 **Deliverables**
 
-- [x] `db/init/01_roles.sql`: `transducer_ingest`, `transducer_read`, SCRAM passwords.
+- [x] `db/init/01_roles.sql`: `transducer_upload`, `transducer_ingest`, `transducer_read`,
+  SCRAM passwords, pinned `search_path`.
 - [x] `db/init/02_schema.sql`: schema, tables, constraints, indexes.
 - [x] `db/init/03_views.sql`: `v_reading`, `v_reading_utc`, `v_import`.
 - [x] `db/init/04_grants.sql`: least-privilege grants.
-- [x] `db/tests/verify_phase1.sh`: acceptance checks.
+- [x] `db/init/05_ingest.sql`: `ingest.job`, `ingest.worker_heartbeat`,
+  `ingest.file_known()`.
+- [x] `db/migrations/0001_ingest.sql`: idempotent upgrade for existing databases.
+- [x] `db/tests/verify_phase1.sh`: acceptance checks for all roles and the queue.
 - [x] `db/tests/run_phase1.sh`: runs the acceptance checks inside the Compose `db` service.
-- [x] Compose `db` service passes role passwords, forces SCRAM, and uses a TCP healthcheck.
-- [ ] `docker compose up -d db` verified healthy on the Linux VM.
+- [x] Compose `db` service passes role passwords, forces SCRAM, uses a TCP healthcheck, and
+  publishes no port.
+- [ ] `docker compose up -d --build` verified healthy on the Linux VM.
 
 **Exit criteria**
 
 - [x] Schema applies cleanly to an empty database (verified on embedded PostgreSQL 16.2).
 - [x] Roles authenticate with `scram-sha-256` (verified).
 - [x] Read role cannot write; write role cannot alter schema (verified).
-- [ ] `docker compose down -v` / re-init cycle verified on the VM.
+- [x] Upload role is confined to `ingest.job` (verified).
+- [ ] Re-init and migration paths verified on the VM.
 
 ## Phase 2 — Parser and validation (complete)
 
@@ -60,10 +66,10 @@ Docker/Compose verification on the Linux VM is pending.
 **Deliverables**
 
 - [x] `ingest/transducer_ingest/load.py` with staging `COPY` + upsert.
-- [x] `ingest/transducer_ingest/db.py` for `PG*` connection configuration.
-- [x] `ingest/transducer_ingest/cli.py` with `ingest`, `--dry-run`, `--since`, `--json`,
-  `--all`, and `report`.
-- [x] `scripts/run_ingest.ps1` for Task Scheduler.
+- [x] `ingest/transducer_ingest/db.py` for role-aware connection configuration.
+- [x] `ingest/transducer_ingest/cli.py` with `ingest`, `upload`, `report`, `--dry-run`,
+  `--since`, `--json`, and `--all`.
+- [x] `scripts/run_ingest.ps1` retained for direct development loads.
 
 **Exit criteria**
 
@@ -77,27 +83,40 @@ Docker/Compose verification on the Linux VM is pending.
 - [x] 29 byte-identical files are skipped at the file level; 118 `import_file` audit rows are
   written on a fresh full load (45 of them `skipped_compensated`).
 
-## Phase 4 — Infrastructure and network access
+## Phase 4 — VM-hosted ingest gateway (implemented; VM verification pending)
 
 **Deliverables**
 
-- Linux VM with Docker Engine and Compose.
-- Production `.env` on the VM and ingest host.
-- Firewall rules scoped to the internal subnet.
-- Nightly `pg_dump` job and a documented restore procedure.
+- [x] `ingest/transducer_ingest/service/`: settings, bearer auth, spool, jobs, upload API,
+  worker, healthcheck, and migration runner.
+- [x] `ingest/transducer_ingest/upload.py`: HTTPS uploader with settle/completeness checks,
+  hashing, `HEAD`, retries, and optional wait.
+- [x] `scripts/upload_xle.ps1`: manual Windows wrapper with a mutex and daily log.
+- [x] `ingest/Dockerfile` for the API, worker, and migrate service.
+- [x] `caddy/` TLS reverse proxy and `certs/` instructions.
+- [x] Compose stack: `db`, `migrate`, `ingest-api`, `ingest-worker`, `read-api`, `caddy`;
+  only Caddy publishes a port.
+- [x] Postgres-backed queue with `FOR UPDATE SKIP LOCKED`, stale-lock recovery, retries, and
+  a heartbeat.
+- [x] Unit tests for settings, auth, spool, uploader, queue helpers, and the API.
+- [ ] Caddy starts with a valid certificate on the VM.
+- [ ] Upload → queue → worker → database flow verified end-to-end on the VM.
+- [ ] Worker crash/restart recovery verified on the VM.
 
 **Exit criteria**
 
-- Ingest host connects on 5432.
-- Another internal host can query with the read-only role.
-- Connections from outside the allowed subnet are blocked.
-- A restore from backup succeeds in a scratch database.
+- [ ] `docker compose up -d --build` brings the stack up healthy.
+- [ ] `db/tests/run_phase1.sh` passes inside the Compose project.
+- [ ] `curl` to `/api/loggers` without a token returns 401; with a read token returns data.
+- [ ] `POST /ingest/v1/uploads` without a token returns 401; with an ingest token enqueues a
+  job.
+- [ ] PostgreSQL is unreachable from the host (`psql -h <vm> -p 5432` fails).
 
 ## Phase 5 — Backfill and reconciliation
 
 **Deliverables**
 
-- Full import of the current OneDrive export.
+- Full upload and import of the current OneDrive export.
 - Reconciliation report by status, logger, and location.
 - Review notes for the 13 anomalous files and location mismatches.
 
@@ -106,37 +125,43 @@ Docker/Compose verification on the Linux VM is pending.
 - Acceptance totals from Phase 3 confirmed in production.
 - No compensated rows.
 - Known anomalies documented; none block dashboard use.
+- Re-running the uploader uploads zero new files.
 
-## Phase 6 — Read-only API
+## Phase 6 — Read-only API (implemented; VM verification pending)
 
 **Deliverables**
 
-- `api/app.py` with FastAPI and parameterized queries.
-- Endpoints: `/health`, `/loggers`, `/locations`, `/series`, `/readings`,
-  `/readings/latest`, `/imports`, optional `/series/{id}/summary`.
-- Local and UTC time output via `?tz=local|utc`.
-- Dockerfile and compose service.
+- [x] `api/transducer_api/`: settings, read-role connection, bearer auth, and app.
+- [x] Endpoints: `/health`, `/loggers`, `/locations`, `/series`, `/readings`,
+  `/readings/latest`, `/imports`, `/series/{id}/summary`.
+- [x] Local and UTC time output via `?tz=local|utc`.
+- [x] Dockerfile and Compose service.
+- [x] Router-level bearer authentication before any database connection.
+- [ ] Verified against production data on the VM.
 
 **Exit criteria**
 
-- API uses only the read-only role.
-- `tz=local` and `tz=utc` return the same instants with correct offsets.
-- Pagination and maximum time-window limits enforced.
-- CORS limited to configured dashboard origins.
+- [ ] API uses only the read-only role.
+- [ ] `tz=local` and `tz=utc` return the same instants with correct offsets.
+- [ ] Pagination and maximum time-window limits enforced.
+- [ ] CORS limited to configured dashboard origins.
+- [ ] Unauthenticated requests cannot open a database connection.
 
 ## Phase 7 — Operations
 
 **Deliverables**
 
-- Scheduled ingest (Task Scheduler) and backups (cron/systemd).
-- Monitoring/alerting for ingest failures, stale data, and disk usage.
-- Runbook: start/stop, restore, rotate passwords, add a new site/logger.
+- Backups (cron/systemd) and restore procedure.
+- Monitoring/alerting for ingest failures, stale worker heartbeat, and disk usage.
+- Runbook: start/stop, restore, rotate passwords and tokens, add a new site/logger.
+- Manual upload cadence documented for the operator.
 
 **Exit criteria**
 
-- 30 consecutive days of successful scheduled ingest.
 - Backup restore tested after go-live.
+- Worker heartbeat and failed-job alerts verified.
 - Runbook reviewed by the operator.
+- Certificate rotation rehearsed.
 
 ## Global acceptance criteria (v1)
 
@@ -150,12 +175,14 @@ Docker/Compose verification on the Linux VM is pending.
 | Anomalous files | 13 |
 | Empty files | 1 |
 | Re-run inserts | 0 |
+| Upload role domain-table access | Denied |
 | Read role write attempts | Denied |
-| Out-of-subnet connections | Blocked |
+| Unauthenticated API requests | 401 |
+| PostgreSQL reachable from the LAN | No |
 | API local/UTC consistency | Identical instants |
 
 ## Note on Git
 
-The repository is initialized locally with no remote configured. Commits stay local
-until a remote is provided. Confirm the OneDrive export folder and `.zip` remain ignored
-before each commit.
+The repository is initialized locally with a GitHub remote (`transducer-datahost`). Commits
+stay local until pushed. Confirm the OneDrive export folder, `.env`, and TLS material remain
+ignored before each commit.

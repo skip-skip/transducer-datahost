@@ -29,6 +29,8 @@ POSTGRES_PORT=${POSTGRES_PORT:-${PGPORT:-5432}}
 POSTGRES_DB=${POSTGRES_DB:-${PGDATABASE:-transducer}}
 POSTGRES_USER=${POSTGRES_USER:-${PGUSER:-transducer_admin}}
 ADMIN_PASSWORD=${POSTGRES_PASSWORD:-${PGPASSWORD:-}}
+UPLOAD_USER=${UPLOAD_USER:-transducer_upload}
+UPLOAD_PASSWORD=${UPLOAD_PASSWORD:-}
 INGEST_USER=${INGEST_USER:-transducer_ingest}
 INGEST_PASSWORD=${INGEST_PASSWORD:-}
 READ_USER=${READ_USER:-transducer_read}
@@ -110,8 +112,8 @@ if [ -z "$ADMIN_PASSWORD" ]; then
     printf 'POSTGRES_PASSWORD (admin password) must be set\n' >&2
     exit 2
 fi
-if [ -z "$INGEST_PASSWORD" ] || [ -z "$READ_PASSWORD" ]; then
-    printf 'INGEST_PASSWORD and READ_PASSWORD must be set\n' >&2
+if [ -z "$UPLOAD_PASSWORD" ] || [ -z "$INGEST_PASSWORD" ] || [ -z "$READ_PASSWORD" ]; then
+    printf 'UPLOAD_PASSWORD, INGEST_PASSWORD, and READ_PASSWORD must be set\n' >&2
     exit 2
 fi
 
@@ -156,6 +158,12 @@ cleanup() {
         DELETE FROM transducer.logger
         WHERE serial_number IN ('$TEST_SERIAL', '__verify_forbidden__', '__verify_read_write__');
     " >/dev/null 2>&1 || true
+    admin_psql -Atc "
+        DELETE FROM ingest.job
+        WHERE sha256 = '$TEST_SHA' OR filename LIKE '__verify_phase1%';
+        DELETE FROM ingest.worker_heartbeat
+        WHERE worker_id LIKE '__verify_phase1%';
+    " >/dev/null 2>&1 || true
 }
 trap cleanup EXIT
 
@@ -172,9 +180,12 @@ ROLE_ATTRS=$(query_admin "
         rolcreaterole || ':' || rolreplication || ':' || rolbypassrls,
         ',' ORDER BY rolname)
     FROM pg_roles
-    WHERE rolname IN ('$INGEST_USER', '$READ_USER');
+    WHERE rolname IN ('$UPLOAD_USER', '$INGEST_USER', '$READ_USER');
 ")
 
+check_equal "upload role exists and is a plain login role" \
+    "$UPLOAD_USER:false:true:false:false:false:false" \
+    "$(printf '%s' "$ROLE_ATTRS" | tr ',' '\n' | grep "^$UPLOAD_USER:" || true)"
 check_equal "ingest role exists and is a plain login role" \
     "$INGEST_USER:false:true:false:false:false:false" \
     "$(printf '%s' "$ROLE_ATTRS" | tr ',' '\n' | grep "^$INGEST_USER:" || true)"
@@ -182,20 +193,26 @@ check_equal "read role exists and is a plain login role" \
     "$READ_USER:false:true:false:false:false:false" \
     "$(printf '%s' "$ROLE_ATTRS" | tr ',' '\n' | grep "^$READ_USER:" || true)"
 
-for role in "$INGEST_USER" "$READ_USER"; do
+for role in "$UPLOAD_USER" "$INGEST_USER" "$READ_USER"; do
     PREFIX=$(query_admin "SELECT left(rolpassword, 14) FROM pg_authid WHERE rolname = '$role';")
     check_equal "$role password uses SCRAM-SHA-256" 'SCRAM-SHA-256$' "$PREFIX"
 done
 
+UPLOAD_SEARCH_PATH=$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "SHOW search_path;")
 INGEST_SEARCH_PATH=$(role_psql "$INGEST_USER" "$INGEST_PASSWORD" -Atc "SHOW search_path;")
 READ_SEARCH_PATH=$(role_psql "$READ_USER" "$READ_PASSWORD" -Atc "SHOW search_path;")
-check_equal "ingest search_path is pg_catalog, transducer" 'pg_catalog, transducer' "$INGEST_SEARCH_PATH"
+check_equal "upload search_path is pg_catalog, ingest" 'pg_catalog, ingest' "$UPLOAD_SEARCH_PATH"
+check_equal "ingest search_path is pg_catalog, transducer, ingest" 'pg_catalog, transducer, ingest' "$INGEST_SEARCH_PATH"
 check_equal "read search_path is pg_catalog, transducer" 'pg_catalog, transducer' "$READ_SEARCH_PATH"
 
+check_bool "upload cannot create schemas" 'f' \
+    "SELECT has_database_privilege('$UPLOAD_USER', current_database(), 'CREATE');"
 check_bool "ingest cannot create schemas" 'f' \
     "SELECT has_database_privilege('$INGEST_USER', current_database(), 'CREATE');"
 check_bool "read cannot create schemas" 'f' \
     "SELECT has_database_privilege('$READ_USER', current_database(), 'CREATE');"
+check_bool "upload is not a member of the admin role" 'f' \
+    "SELECT pg_has_role('$UPLOAD_USER', '$POSTGRES_USER', 'MEMBER');"
 check_bool "ingest is not a member of the admin role" 'f' \
     "SELECT pg_has_role('$INGEST_USER', '$POSTGRES_USER', 'MEMBER');"
 check_bool "read is not a member of the admin role" 'f' \
@@ -204,16 +221,22 @@ check_bool "read is not a member of the admin role" 'f' \
 # ---------------------------------------------------------------------------
 # Authentication over TCP with SCRAM
 # ---------------------------------------------------------------------------
+check_equal "upload authenticates over TCP" "$UPLOAD_USER" \
+    "$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "SELECT current_user;")"
 check_equal "ingest authenticates over TCP" "$INGEST_USER" \
     "$(role_psql "$INGEST_USER" "$INGEST_PASSWORD" -Atc "SELECT current_user;")"
 check_equal "read authenticates over TCP" "$READ_USER" \
     "$(role_psql "$READ_USER" "$READ_PASSWORD" -Atc "SELECT current_user;")"
 
+UPLOAD_TCP=$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "SELECT inet_server_addr() IS NOT NULL;")
 INGEST_TCP=$(role_psql "$INGEST_USER" "$INGEST_PASSWORD" -Atc "SELECT inet_server_addr() IS NOT NULL;")
 READ_TCP=$(role_psql "$READ_USER" "$READ_PASSWORD" -Atc "SELECT inet_server_addr() IS NOT NULL;")
+check_equal "upload connection uses TCP" 't' "$UPLOAD_TCP"
 check_equal "ingest connection uses TCP" 't' "$INGEST_TCP"
 check_equal "read connection uses TCP" 't' "$READ_TCP"
 
+expect_failure "upload rejects a wrong password" 'password authentication failed' \
+    "$UPLOAD_USER" 'definitely-not-the-password' "SELECT 1;"
 expect_failure "ingest rejects a wrong password" 'password authentication failed' \
     "$INGEST_USER" 'definitely-not-the-password' "SELECT 1;"
 expect_failure "read rejects a wrong password" 'password authentication failed' \
@@ -361,6 +384,82 @@ expect_failure "aquifer-test flag must match the name" 'check constraint' \
     "$INGEST_USER" "$INGEST_PASSWORD" \
     "INSERT INTO transducer.location (name, base_location, is_aquifer_test)
      VALUES ('$TEST_AT_LOCATION', '__verify_phase1', false);"
+
+# ---------------------------------------------------------------------------
+# Ingest queue: the upload role can enqueue only; the worker can process
+# ---------------------------------------------------------------------------
+check_bool "upload has USAGE on ingest" 't' \
+    "SELECT has_schema_privilege('$UPLOAD_USER', 'ingest', 'USAGE');"
+check_bool "upload has no USAGE on transducer" 'f' \
+    "SELECT has_schema_privilege('$UPLOAD_USER', 'transducer', 'USAGE');"
+check_bool "read has no USAGE on ingest" 'f' \
+    "SELECT has_schema_privilege('$READ_USER', 'ingest', 'USAGE');"
+check_bool "ingest has USAGE on ingest" 't' \
+    "SELECT has_schema_privilege('$INGEST_USER', 'ingest', 'USAGE');"
+
+check_bool "upload can insert ingest.job" 't' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'ingest.job', 'INSERT');"
+check_bool "upload can select ingest.job" 't' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'ingest.job', 'SELECT');"
+check_bool "upload can update ingest.job" 't' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'ingest.job', 'UPDATE');"
+check_bool "upload cannot delete ingest.job" 'f' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'ingest.job', 'DELETE');"
+check_bool "upload has no SELECT on import_file" 'f' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'transducer.import_file', 'SELECT');"
+check_bool "upload has no SELECT on reading" 'f' \
+    "SELECT has_table_privilege('$UPLOAD_USER', 'transducer.reading', 'SELECT');"
+
+JOB_ID=$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
+    INSERT INTO ingest.job (sha256, filename, byte_size, source_client)
+    VALUES ('$TEST_SHA', '__verify_phase1_job.xle', 1234, 'verify')
+    RETURNING job_id;
+")
+pass "upload can enqueue a job (sequence usable)"
+
+check_equal "upload sees its queued job" 'queued|__verify_phase1_job.xle' \
+    "$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
+        SELECT status || '|' || filename FROM ingest.job WHERE job_id = $JOB_ID;")"
+
+expect_failure "upload cannot read import_file directly" 'permission denied' \
+    "$UPLOAD_USER" "$UPLOAD_PASSWORD" "SELECT count(*) FROM transducer.import_file;"
+expect_failure "upload cannot delete jobs" 'permission denied' \
+    "$UPLOAD_USER" "$UPLOAD_PASSWORD" \
+    "DELETE FROM ingest.job WHERE job_id = $JOB_ID;"
+expect_failure "upload cannot create a table in ingest" 'permission denied' \
+    "$UPLOAD_USER" "$UPLOAD_PASSWORD" \
+    "BEGIN; CREATE TABLE ingest.__verify_forbidden (id integer); ROLLBACK;"
+
+check_equal "file_known finds an imported hash" 't' \
+    "$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
+        SELECT ingest.file_known('$TEST_SHA');")"
+check_equal "file_known rejects an unknown hash" 'f' \
+    "$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
+        SELECT ingest.file_known(
+            'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');")"
+
+CLAIMED=$(role_psql "$INGEST_USER" "$INGEST_PASSWORD" -Atc "
+    UPDATE ingest.job
+    SET status = 'processing', locked_at = now(), attempt_count = attempt_count + 1
+    WHERE job_id = $JOB_ID AND status = 'queued'
+    RETURNING status;
+")
+check_equal "ingest can claim a queued job" 'processing' "$CLAIMED"
+
+expect_success "ingest can finish a job" "$INGEST_USER" "$INGEST_PASSWORD" "
+    UPDATE ingest.job
+    SET status = 'done', import_status = 'imported', file_id = $FILE_ID,
+        locked_at = NULL, finished_at = now()
+    WHERE job_id = $JOB_ID;
+"
+
+expect_success "ingest can write a worker heartbeat" "$INGEST_USER" "$INGEST_PASSWORD" "
+    INSERT INTO ingest.worker_heartbeat (worker_id) VALUES ('__verify_phase1_worker')
+    ON CONFLICT (worker_id) DO UPDATE SET last_seen = now();
+"
+
+expect_failure "read cannot select ingest.job" 'permission denied' \
+    "$READ_USER" "$READ_PASSWORD" "SELECT count(*) FROM ingest.job;"
 
 # ---------------------------------------------------------------------------
 # Read role: allowed reads
