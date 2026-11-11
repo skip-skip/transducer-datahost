@@ -512,3 +512,30 @@ only Caddy joins. Caddy reaches `ingest-api` and `read-api` over `backend` and p
   firewall rules can still restrict egress if required.
 - `edge` must stay non-internal: setting `internal: true` on it silently disables port
   publishing again.
+
+---
+
+## ADR-025: Serve a catch-all HTTPS listener with default SNI
+
+**Status:** Accepted (Phase 4)
+
+**Context:** The site address was `https://{$INGEST_HOSTNAME}:8443`, which adds a Host
+matcher and binds certificate selection to that name. Clients that connect to a bare IP
+literal do not send SNI (RFC 6066 forbids IP addresses in `server_name`), so Caddy could
+not select a certificate and aborted the handshake with `tlsv1 alert internal error`.
+Operators naturally test with `curl https://<vm-ip>:8443/ingest/health`, which made a
+working gateway look broken.
+
+**Decision:** Use a catch-all `https://:8443` listener with the manual certificate, and set
+`default_sni {$INGEST_HOSTNAME}` so no-SNI clients receive that certificate. Routing stays
+path-based (`/ingest/*`, `/api/*`); no Host matcher is applied.
+
+**Consequences:**
+
+- Both `https://transducer.internal:8443` and `https://192.168.4.89:8443` work.
+- The certificate must include any IP clients use for verification; `curl -k` works
+  regardless.
+- Host-based access control is not provided by Caddy. Authorization remains the bearer
+  token on every API endpoint except `/health`.
+- `default_sni` only applies when the client sends no SNI; a client that sends an
+  unexpected SNI still fails unless the certificate covers it.

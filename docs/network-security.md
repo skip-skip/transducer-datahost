@@ -79,7 +79,9 @@ Rules:
 ### API
 
 - TLS is mandatory. Caddy terminates HTTPS on 8443 with a certificate for
-  `INGEST_HOSTNAME` (see `certs/README.md`).
+  `INGEST_HOSTNAME` (see `certs/README.md`). The listener is a catch-all and sets
+  `default_sni`, so clients that connect by IP literal (which send no SNI) still complete
+  the handshake; the certificate must include the IP for verification.
 - Both APIs use static bearer tokens configured as comma-separated `label:token` pairs:
   - `INGEST_API_TOKENS` for the upload API.
   - `READ_API_TOKENS` for the read API.

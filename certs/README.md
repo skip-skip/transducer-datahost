@@ -2,7 +2,9 @@
 
 Caddy terminates TLS for the ingest gateway and the read API. The certificate
 must match the name clients use to reach the VM. The recommended internal name
-is `transducer.internal`.
+is `transducer.internal`. Add the VM's LAN IP too if clients will connect by IP
+address; IP literals are not sent as SNI, and Caddy's `default_sni` covers the
+handshake, but the certificate still has to contain the IP for verification.
 
 The certificate and key are **not** committed. This directory is mounted into
 the Caddy container read-only at `/etc/caddy/certs`.
@@ -17,8 +19,10 @@ mkcert -install
 mkcert \
   -cert-file server.crt \
   -key-file server.key \
-  transducer.internal localhost 127.0.0.1
+  transducer.internal localhost 127.0.0.1 192.168.4.89
 ```
+
+Replace `192.168.4.89` with the VM's actual LAN address (`hostname -I`).
 
 `mkcert -install` adds the local root CA to the VM's trust store. For Windows
 clients, either run `mkcert -install` there too or copy the root CA
@@ -41,7 +45,9 @@ Clients must trust the issuing CA. The uploader accepts the CA bundle with
 
 Add an internal DNS record (or hosts-file entry) for `transducer.internal`
 pointing at the VM. If the VM name differs, set `INGEST_HOSTNAME` in `.env`;
-Caddy uses it for the site address and the certificate must match.
+Caddy uses it as `default_sni` and the certificate must match. The listener is a
+catch-all, so requests addressed to the VM's IP also reach the APIs, provided
+the certificate includes that IP (or the client skips verification).
 
 ## Rotation
 

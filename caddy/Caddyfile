@@ -6,15 +6,22 @@
 #   /ingest/*  -> ingest-api:8080   (prefix stripped)
 #   /api/*     -> read-api:8080     (prefix stripped)
 #
-# Only Caddy is reachable from the host. PostgreSQL and both application
-# containers stay on the internal Compose network.
+# The listener is a catch-all so clients may use either INGEST_HOSTNAME or the
+# VM's IP address. Only Caddy is reachable from the host. PostgreSQL and both
+# application containers stay on the internal Compose network.
 
 {
 	admin off
 	auto_https off
+	# Clients that connect to an IP literal do not send SNI (RFC 6066 forbids
+	# it). Without a default, Caddy has no certificate to serve and aborts the
+	# handshake with a TLS internal_error alert.
+	default_sni {$INGEST_HOSTNAME:transducer.internal}
 }
 
-https://{$INGEST_HOSTNAME:transducer.internal}:8443 {
+# Catch-all HTTPS listener. Certificate selection uses SNI (or default_sni
+# above); requests are routed by path only, not by Host header.
+https://:8443 {
 	tls /etc/caddy/certs/server.crt /etc/caddy/certs/server.key
 
 	encode zstd gzip
