@@ -68,7 +68,9 @@ backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 
 All inbound traffic enters through Caddy on port 8443. PostgreSQL and both application
 containers are on an internal Compose network with no published ports and no route to the
-host or the internet.
+host or the internet. Caddy joins that network and a separate non-internal `edge` network,
+used by no other service, because Docker does not publish host ports for a container
+attached only to internal networks.
 
 ## 4. Components
 
@@ -119,9 +121,11 @@ host or the internet.
 - `ingest-worker`: single-writer queue worker using `transducer_ingest`; reuses
   `parse_xle`, `validate`, and `load`.
 - `read-api`: FastAPI read-only service using `transducer_read`.
-- `caddy`: TLS terminator and path router. The only service with a published port.
+- `caddy`: TLS terminator and path router. The only service with a published port, and the
+  only member of the non-internal `edge` network.
 - Named volumes: `pgdata`, `spool`, `caddy_data`, `caddy_config`.
-- Internal Compose network `backend` with `internal: true`.
+- Internal Compose network `backend` with `internal: true`, plus the non-internal `edge`
+  network for Caddy's published port.
 - Nightly `pg_dump` to a network share (planned).
 
 ### Windows host
@@ -189,7 +193,8 @@ without schema changes.
    series to coexist with raw data without key collisions.
 7. **Least privilege by role.** Upload, worker, and read roles have disjoint grants.
 8. **One front door.** Only Caddy is reachable; everything else stays on an internal
-   network.
+   network. Caddy's published port lives on a non-internal `edge` network that no other
+   service joins.
 
 ## 10. Non-goals
 

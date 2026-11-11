@@ -487,3 +487,28 @@ PostgreSQL is not published.
 - Audit labels are meaningful per service.
 - Two services to deploy and monitor, but they share one TLS front door.
 - New analyst questions require extending the read API rather than ad hoc SQL.
+
+---
+
+## ADR-024: Publish Caddy through a non-internal edge network
+
+**Status:** Accepted (Phase 4)
+
+**Context:** Docker does not publish host ports for a container attached only to networks
+declared `internal: true` (moby/moby #44986). With Caddy attached only to `backend`,
+`HostConfig.PortBindings` was populated but `NetworkSettings.Ports` stayed empty, so 8443
+was never bound on the VM and every client saw `connection refused`. The local acceptance
+tests did not catch this because they never exercised the published port.
+
+**Decision:** Keep `backend` internal and add a second, non-internal `edge` network that
+only Caddy joins. Caddy reaches `ingest-api` and `read-api` over `backend` and publishes
+8443 from `edge`. No other service joins `edge` or publishes a port.
+
+**Consequences:**
+
+- `docker compose port caddy 8443` reports `0.0.0.0:8443` and remote clients can connect.
+- PostgreSQL and the application services remain isolated on `backend`.
+- Caddy has an outbound route through `edge`; it needs no internet access, so host
+  firewall rules can still restrict egress if required.
+- `edge` must stay non-internal: setting `internal: true` on it silently disables port
+  publishing again.

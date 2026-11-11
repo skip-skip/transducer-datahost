@@ -41,7 +41,9 @@ Out of scope for v1:
 ## Architecture at a glance
 
 Only Caddy publishes a port. PostgreSQL, the ingest API, the worker, and the read API stay
-on an internal Compose network with no route to the host or the internet.
+on an internal Compose network with no route to the host or the internet. Caddy joins a
+second, non-internal `edge` network (no other service does) because Docker will not publish
+host ports for a container attached only to internal networks.
 
 ```
  OneDrive export folder (Windows)

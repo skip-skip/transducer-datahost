@@ -24,7 +24,9 @@
 
 All traffic stays on the internal network. There is no public exposure. Only Caddy
 publishes a host port; PostgreSQL and both application services are reachable only on the
-internal Compose network `backend` (`internal: true`).
+internal Compose network `backend` (`internal: true`). Caddy also joins a non-internal
+`edge` network, used by no other service, because Docker does not publish host ports for a
+container attached exclusively to internal networks (moby/moby #44986).
 
 ## 2. Firewall rules
 
@@ -136,6 +138,7 @@ Rules:
 
 - [ ] Only Caddy publishes a port (8443).
 - [ ] PostgreSQL has no published port and `backend` is `internal: true`.
+- [ ] Caddy's `edge` network is not `internal` (Docker will not publish ports otherwise).
 - [ ] Firewall default-deny with explicit allow rules.
 - [ ] `scram-sha-256` only; no `trust` entries.
 - [ ] Separate upload/worker/read roles; no application superuser.

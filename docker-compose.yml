@@ -2,8 +2,11 @@
 # VM-hosted transducer data warehouse.
 #
 # Only Caddy publishes a port (8443). PostgreSQL, the ingest API, the worker,
-# and the read API stay on the internal Compose network. The parser and loader
-# run on the same VM as the database; the Windows uploader talks HTTPS only.
+# and the read API stay on the internal Compose network. Caddy also joins a
+# non-internal `edge` network because Docker does not publish host ports for a
+# container attached exclusively to internal networks (moby/moby #44986). The
+# parser and loader run on the same VM as the database; the Windows uploader
+# talks HTTPS only.
 #
 # First run:
 #   1. cp .env.example .env and fill in passwords and API tokens.
@@ -244,6 +247,9 @@ services:
       start_period: 10s
     networks:
       - backend
+      # Docker will not publish 8443 when Caddy is attached only to internal
+      # networks. `edge` is non-internal and carries no other service.
+      - edge
 
 volumes:
   pgdata:
@@ -252,7 +258,12 @@ volumes:
   caddy_config:
 
 networks:
-  # No route to the host or the internet. Only Caddy's published port is
-  # reachable from outside the Compose project.
+  # Internal: no route to the host or the internet. PostgreSQL and the
+  # application services are reachable only here.
   backend:
     internal: true
+  # Non-internal network joined only by Caddy. Docker will not publish host
+  # ports for a container attached exclusively to internal networks
+  # (moby/moby #44986), so the published 8443 lives on this side. No other
+  # service joins it.
+  edge: {}
