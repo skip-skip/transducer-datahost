@@ -5,6 +5,8 @@
 #
 #   /ingest/*    -> ingest-api:8080   (prefix stripped)
 #   /api/*       -> read-api:8080     (prefix stripped)
+#   /dashboard   -> /dashboard/       (308; the bare URL lacks the slash the
+#                                      route below matches)
 #   /dashboard/* -> dashboard:8080    (prefix stripped; app root_path is
 #                                      /dashboard so generated URLs keep the
 #                                      prefix)
@@ -44,6 +46,10 @@ https://:8443 {
 	handle_path /dashboard/* {
 		reverse_proxy dashboard:8080
 	}
+
+	# /dashboard without the trailing slash matches no route above and would
+	# fall through to the catch-all. Redirect it so the bare URL works.
+	redir /dashboard /dashboard/ 308
 
 	handle {
 		respond "Not found" 404

@@ -159,10 +159,35 @@ Start or update the service:
 
 ```bash
 docker compose up -d --build read-api dashboard caddy
+docker compose restart caddy      # after any Caddyfile change
 docker compose ps
 ```
 
+`docker compose up -d` recreates a container only when its image or service
+definition changed. The Caddyfile is bind-mounted into the caddy container and
+read by the caddy process only at start, so after editing it a restart (or
+`docker compose up -d --force-recreate caddy`) is required; a rebuild alone
+never reloads it.
+
 Open `https://<INGEST_HOSTNAME>:8443/dashboard/` and sign in with a read token.
+The bare `/dashboard` without a trailing slash is redirected to `/dashboard/`
+by a `redir` in `caddy/Caddyfile`.
+
+### TLS termination
+
+Caddy terminates TLS and proxies to the dashboard over plain HTTP. Without
+further configuration uvicorn would see `scheme=http`, and the absolute URLs
+the app generates (form actions, static assets, redirects) would be `http://`
+— browsers block those as mixed content, so styles and scripts do not load and
+the login form cannot submit. The dashboard therefore runs uvicorn with
+`--proxy-headers --forwarded-allow-ips "*"`, so Caddy's
+`X-Forwarded-Proto: https` sets the scheme and every generated URL is
+`https://`.
+
+The wildcard allow-list is safe because the dashboard's port is reachable only
+from the internal Compose network, and Caddy overwrites `X-Forwarded-Proto` on
+every request it proxies, so a browser cannot spoof the header through the
+edge.
 
 Back up the state file:
 
@@ -194,6 +219,8 @@ safe.
 7. Confirm a 30-day high-frequency chart returns at most `DASHBOARD_MAX_POINTS`
    points.
 8. Test backup and restore of the volume.
+9. Behind the TLS front door, the login page's form action and asset URLs are
+   `https://`; the browser reports no mixed content.
 
 ## 9. Boundaries
 

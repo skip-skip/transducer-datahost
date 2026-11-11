@@ -238,6 +238,12 @@ services:
       - dashboard_state:/var/lib/transducer-dashboard
     expose:
       - "8080"
+    # --proxy-headers: Caddy terminates TLS and proxies over plain HTTP, so
+    # uvicorn must honor Caddy's X-Forwarded-Proto header or the app builds
+    # absolute http:// URLs that browsers block as mixed content. The wildcard
+    # allow-list is safe because this port is reachable only from the internal
+    # Compose network and Caddy overwrites X-Forwarded-Proto on what it
+    # proxies.
     command:
       [
         "uvicorn",
@@ -249,6 +255,9 @@ services:
         "8080",
         "--root-path",
         "/dashboard",
+        "--proxy-headers",
+        "--forwarded-allow-ips",
+        "*",
       ]
     healthcheck:
       test:
@@ -285,6 +294,9 @@ services:
     extra_hosts:
       - "${INGEST_HOSTNAME:-transducer.internal}:127.0.0.1"
     volumes:
+      # Bind-mounted and read by the caddy process only at start. After
+      # editing the Caddyfile run `docker compose restart caddy`; a rebuild
+      # or `up -d` alone never reloads it.
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
       - ./certs:/etc/caddy/certs:ro
       - caddy_data:/data
