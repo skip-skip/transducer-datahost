@@ -213,6 +213,58 @@ services:
     networks:
       - backend
 
+  dashboard:
+    build:
+      context: .
+      dockerfile: dashboard/Dockerfile
+    container_name: transducer-dashboard
+    restart: unless-stopped
+    depends_on:
+      read-api:
+        condition: service_healthy
+    # Deliberately no POSTGRES_* variables: the dashboard has no database
+    # credentials. It talks to the read API and owns a JSON state volume.
+    environment:
+      READ_API_URL: http://read-api:8080
+      DASHBOARD_SECRET_KEY: ${DASHBOARD_SECRET_KEY:?set DASHBOARD_SECRET_KEY in .env}
+      DASHBOARD_STATE_DIR: /var/lib/transducer-dashboard
+      DASHBOARD_SESSION_MAX_AGE: ${DASHBOARD_SESSION_MAX_AGE:-28800}
+      DASHBOARD_DEFAULT_WINDOW_DAYS: ${DASHBOARD_DEFAULT_WINDOW_DAYS:-7}
+      DASHBOARD_MAX_POINTS: ${DASHBOARD_MAX_POINTS:-2000}
+      DASHBOARD_SHARED_EDITORS: ${DASHBOARD_SHARED_EDITORS:-}
+      DASHBOARD_COOKIE_SECURE: ${DASHBOARD_COOKIE_SECURE:-true}
+      SITE_TIMEZONE: ${SITE_TIMEZONE:-America/New_York}
+    volumes:
+      - dashboard_state:/var/lib/transducer-dashboard
+    expose:
+      - "8080"
+    command:
+      [
+        "uvicorn",
+        "transducer_dashboard.app:create_app",
+        "--factory",
+        "--host",
+        "0.0.0.0",
+        "--port",
+        "8080",
+        "--root-path",
+        "/dashboard",
+      ]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=5)",
+        ]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 10s
+    networks:
+      - backend
+
   caddy:
     build: ./caddy
     container_name: transducer-caddy
@@ -221,6 +273,8 @@ services:
       ingest-api:
         condition: service_healthy
       read-api:
+        condition: service_healthy
+      dashboard:
         condition: service_healthy
     environment:
       INGEST_HOSTNAME: ${INGEST_HOSTNAME:-transducer.internal}
@@ -254,6 +308,7 @@ services:
 volumes:
   pgdata:
   spool:
+  dashboard_state:
   caddy_data:
   caddy_config:
 

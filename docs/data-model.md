@@ -264,3 +264,22 @@ ORDER BY v.ts;
 - Series are created separately by the extended unique key.
 - A view can pivot raw and compensated values side by side by timestamp.
 - No change to `reading` primary key is required.
+
+## 10. Dashboard state (not SQL)
+
+The dashboard deliberately adds no tables and no database role. Its layout state is a
+single JSON document on the `dashboard_state` Docker volume, owned by the dashboard
+service:
+
+- `personal[<read-token label>].figures`: private figures.
+- `shared.figures`: figures visible to every valid read token.
+- `personal[<read-token label>].ui`: selected figure, pane collapse, and active view.
+
+A figure stores `id`, `name`, `series_id`, `position`, `config`, `created_by`,
+`created_at`, and `updated_at`. It binds to `transducer.series.series_id` by value only;
+there is no foreign key because the dashboard has no database connection. The UI derives
+Source and Analyte labels from `/api/series/{id}`.
+
+See [docs/dashboard.md](dashboard.md) for the document shape, atomic-write behavior, and
+backup procedure. Migrating this state into PostgreSQL later would not change the
+timeseries schema.

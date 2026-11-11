@@ -8,9 +8,9 @@ logger exports, and a read-only interface for internal dashboards and analysts.
 The source of truth remains the OneDrive export folder. The database is a derived,
 queryable copy with provenance back to the originating `.xle` file.
 
-**Current status:** the schema, parser, loader, VM-hosted ingest gateway, and read API are
-implemented. Unit tests pass locally; Docker/Compose verification and the production
-backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
+**Current status:** the schema, parser, loader, VM-hosted ingest gateway, read API, and
+dashboard service are implemented. Unit tests pass locally; Docker/Compose verification and
+the production backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 
 ## 2. Scope
 
@@ -23,16 +23,17 @@ backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 - Track every imported file and its validation status.
 - Expose data through a bearer-token read-only API.
 - Support local-time and UTC representations of timestamps.
+- Provide a simple dashboard with personal and shared figures backed by the read API.
 
 ### Out of scope (v1)
 
 - Compensated exports and barometric compensation math.
-- Dashboard user interface.
 - Write access for dashboards.
 - Public internet exposure, SSO, or per-user authorization.
 - Real-time streaming; ingestion is batch and manually triggered.
 - Direct SQL access for analysts.
 - Scheduled/automated uploads.
+- Nested dashboard folders or dashboard state in PostgreSQL.
 
 ## 3. System context
 
@@ -50,8 +51,9 @@ backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 | Linux VM, :8443             |          | Linux VM, Docker            |
 | /ingest/* -> ingest API     |          | schemas: transducer, ingest |
 | /api/*    -> read API       |          | no published port           |
-+------+----------------------+          +--------------+--------------+
-       |                                                ^
+| /dashboard/* -> dashboard   |          +--------------+--------------+
++------+----------------------+                         ^
+       |                                                |
        | internal Compose network                       |
        v                                                |
 +-----------------------------+   enqueue / claim / load |
@@ -61,9 +63,15 @@ backfill are pending on the Linux VM. See [docs/roadmap.md](roadmap.md).
 +-----------------------------+
 
 +-----------------------------+          +-----------------------------+
-| read API (read role)        |--------->| Dashboards / analysts       |
-| Linux VM, internal network  |  HTTPS   | internal network            |
-+-----------------------------+          +-----------------------------+
+| read API (read role)        |--------->| Dashboard service           |
+| Linux VM, internal network  |  HTTP    | JSON state volume           |
++-----------------------------+          | read token only, no DB role |
+                                         +--------------+--------------+
+                                                        | HTTPS /dashboard/*
+                                                        v
+                                         +-----------------------------+
+                                         | Browser / analysts          |
+                                         +-----------------------------+
 ```
 
 All inbound traffic enters through Caddy on port 8443. PostgreSQL and both application
@@ -84,7 +92,8 @@ attached only to internal networks.
 | Migrate | Create/update roles and apply `db/migrations` | Linux VM, Docker (one-shot) |
 | PostgreSQL | Durable store, deduplication keys, queue, audit trail | Linux VM, Docker |
 | Read API | Read-only REST access with local/UTC time handling | Linux VM, Docker |
-| Consumers | Dashboards and analysts using the read API | Internal network |
+| Dashboard | Server-rendered figures over the read API; personal/shared JSON state | Linux VM, Docker |
+| Consumers | Analysts using the read API or the dashboard | Internal network |
 
 ## 5. Data flow
 
@@ -121,9 +130,13 @@ attached only to internal networks.
 - `ingest-worker`: single-writer queue worker using `transducer_ingest`; reuses
   `parse_xle`, `validate`, and `load`.
 - `read-api`: FastAPI read-only service using `transducer_read`.
-- `caddy`: TLS terminator and path router. The only service with a published port, and the
-  only member of the non-internal `edge` network.
-- Named volumes: `pgdata`, `spool`, `caddy_data`, `caddy_config`.
+- `dashboard`: FastAPI + Jinja2 + HTMX + Plotly service with no database role. It
+  forwards the browser's read token to `read-api` and persists figures and UI state in
+  `state.json` on the `dashboard_state` volume.
+- `caddy`: TLS terminator and path router for `/ingest/*`, `/api/*`, and `/dashboard/*`.
+  The only service with a published port, and the only member of the non-internal `edge`
+  network.
+- Named volumes: `pgdata`, `spool`, `dashboard_state`, `caddy_data`, `caddy_config`.
 - Internal Compose network `backend` with `internal: true`, plus the non-internal `edge`
   network for Caddy's published port.
 - Nightly `pg_dump` to a network share (planned).
@@ -155,6 +168,8 @@ directly.
 | XML parsing | `defusedxml` / `lxml` | Safe parsing of external files |
 | DB driver | `psycopg` 3 | Fast bulk `COPY`, modern API |
 | Read API | FastAPI | Typed endpoints, OpenAPI docs, easy read-only surface |
+| Dashboard | FastAPI + HTMX + Plotly | Server-rendered UI with no Node build step; vendored assets |
+| Dashboard state | JSON file on a volume | No new tables or roles; atomic writes and a file lock |
 | Time zone handling | Postgres `AT TIME ZONE` | Correct local/UTC conversion at query time |
 | Migrations | Small SQL runner | Versioned, checksummed, no heavy dependency |
 
@@ -195,14 +210,16 @@ without schema changes.
 8. **One front door.** Only Caddy is reachable; everything else stays on an internal
    network. Caddy's published port lives on a non-internal `edge` network that no other
    service joins.
+9. **Dashboard state stays out of the domain schema.** The dashboard has no database
+   credentials and stores its own layout JSON on a dedicated volume.
 
 ## 10. Non-goals
 
 - No compensation calculations, barometric correction, or data editing.
-- No UI in this repository.
 - No public endpoints.
 - No streaming or event-driven ingest.
 - No direct SQL or published PostgreSQL port for analysts.
+- No dashboard state in PostgreSQL and no write routes on the read API.
 
 ## 11. Assumptions and constraints
 

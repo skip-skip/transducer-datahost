@@ -3,11 +3,14 @@
 # The public listener is :8443. Caddy terminates TLS with the certificate in
 # /etc/caddy/certs (see certs/README.md) and routes by path prefix:
 #
-#   /ingest/*  -> ingest-api:8080   (prefix stripped)
-#   /api/*     -> read-api:8080     (prefix stripped)
+#   /ingest/*    -> ingest-api:8080   (prefix stripped)
+#   /api/*       -> read-api:8080     (prefix stripped)
+#   /dashboard/* -> dashboard:8080    (prefix stripped; app root_path is
+#                                      /dashboard so generated URLs keep the
+#                                      prefix)
 #
 # The listener is a catch-all so clients may use either INGEST_HOSTNAME or the
-# VM's IP address. Only Caddy is reachable from the host. PostgreSQL and both
+# VM's IP address. Only Caddy is reachable from the host. PostgreSQL and the
 # application containers stay on the internal Compose network.
 
 {
@@ -34,6 +37,12 @@ https://:8443 {
 	# Analysts and dashboards use https://host:8443/api/loggers, and so on.
 	handle_path /api/* {
 		reverse_proxy read-api:8080
+	}
+
+	# Browser dashboard. The prefix is stripped here and restored by the app's
+	# --root-path /dashboard so redirects and static URLs stay under /dashboard.
+	handle_path /dashboard/* {
+		reverse_proxy dashboard:8080
 	}
 
 	handle {

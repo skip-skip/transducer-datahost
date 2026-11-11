@@ -1,7 +1,8 @@
 # Roadmap and Acceptance Criteria
 
 The repository is currently at **Phase 4 (VM deployment) pending verification**. Phases 0–3
-and the application services are implemented and unit-tested locally. The Phase 1 SQL has
+and the application services are implemented and unit-tested locally, and the dashboard
+service (Phase 8) is implemented with unit tests. The Phase 1 SQL has
 been verified against an embedded PostgreSQL 16.2; Docker/Compose verification on the
 Linux VM, the TLS certificate, and the production backfill remain.
 
@@ -162,6 +163,36 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - Worker heartbeat and failed-job alerts verified.
 - Runbook reviewed by the operator.
 - Certificate rotation rehearsed.
+
+## Phase 8 — Dashboard (implemented; VM verification pending)
+
+**Deliverables**
+
+- [x] `dashboard/transducer_dashboard/`: settings, signed session auth, JSON state store,
+  figure operations, read API client, and the FastAPI app.
+- [x] Templates and static assets (HTMX and Plotly vendored) for the collapsible folder
+  pane, figure editor (name, source, analyte, range), and Plotly timeseries chart.
+- [x] Personal figures per read-token label plus shared figures with an optional editor
+  allowlist.
+- [x] Read API additions: `/whoami`, `/series/{id}`, `/series/{id}/points` (server-side
+  bucketing).
+- [x] Dockerfile, Compose service, `dashboard_state` volume, and Caddy `/dashboard/*`
+  route.
+- [x] Unit tests for settings, state, figures, read client, and app routes.
+- [ ] Verified in the browser against production data on the VM.
+
+**Exit criteria**
+
+- [ ] Login with a read token; invalid tokens are rejected and revoked tokens return to
+  login.
+- [ ] Personal and shared figures are isolated as designed; shared edits respect
+  `DASHBOARD_SHARED_EDITORS`.
+- [ ] Creating, renaming, re-binding, and deleting figures works and survives a container
+  restart.
+- [ ] Charts render for 24h/7d/30d, including high-frequency aquifer-test series within
+  `DASHBOARD_MAX_POINTS`.
+- [ ] The dashboard container has no `POSTGRES_*` environment variables.
+- [ ] `state.json` backup and restore tested.
 
 ## Global acceptance criteria (v1)
 

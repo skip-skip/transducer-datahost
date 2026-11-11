@@ -1,0 +1,12 @@
+<label for="analyte">Analyte</label>
+{% if error %}<p class="error">{{ error }}</p>{% endif %}
+<select id="analyte" name="series_id">
+  <option value="">Select an analyte&hellip;</option>
+  {% for item in analytes %}
+  <option value="{{ item.series_id }}"
+    {% if selected_series_id and item.series_id == selected_series_id %}selected{% endif %}>
+    {{ item.identification }} ({{ item.unit }}){% if item.channel_no %} &middot; ch {{ item.channel_no }}{% endif %}{% if item.data_kind %} &middot; {{ item.data_kind }}{% endif %}
+  </option>
+  {% endfor %}
+</select>
+{% if analytes is defined and not analytes %}<p class="hint">No analytes for this source.</p>{% endif %}

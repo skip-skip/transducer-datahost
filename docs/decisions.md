@@ -539,3 +539,35 @@ path-based (`/ingest/*`, `/api/*`); no Host matcher is applied.
   token on every API endpoint except `/health`.
 - `default_sni` only applies when the client sends no SNI; a client that sends an
   unexpected SNI still fails unless the certificate covers it.
+
+---
+
+## ADR-026: Keep dashboard state as JSON on a volume
+
+**Status:** Accepted (dashboard v1)
+
+**Context:** The dashboard needs to persist figures and UI state, but the existing
+timeseries schema must not change and the read role must stay read-only. The options were a
+new `dashboard` schema with a dedicated role, new tables granted to `transducer_read`, or a
+file on a Docker volume. The operator chose no database schema changes.
+
+**Decision:** Add a separate `dashboard` service with no database credentials. It stores
+figures and UI state in `state.json` on the `dashboard_state` volume, protected by a file
+lock, written with an fsync and atomic replace, and validated on every load and write.
+Figures are scoped as personal (per read-token label) or shared. Authentication reuses the
+read API tokens; the browser gets a signed, `HttpOnly`, `Secure`, `SameSite=Strict` cookie.
+The service adds only read-only endpoints to the API: `/whoami`, `/series/{id}`, and
+`/series/{id}/points`.
+
+**Consequences:**
+
+- No new tables, roles, grants, or migrations; the domain schema and read role are
+  untouched.
+- The dashboard has no SQL access and cannot read the database if the read API is down.
+- State is not SQL-queryable and must be backed up separately from `pg_dump`. The JSON
+  shape maps directly to future tables if that changes.
+- The session cookie is signed but not encrypted, so it relies on `HttpOnly` and TLS. A
+  stolen cookie grants the same access as the underlying read token.
+- One uvicorn worker keeps the read-modify-write model simple; the file lock is still used.
+- `DASHBOARD_SHARED_EDITORS` optionally restricts shared edits; otherwise any valid read
+  token may edit shared figures.

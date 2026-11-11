@@ -11,16 +11,25 @@ Base URL in production: `https://<INGEST_HOSTNAME>:8443/api`.
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/health` | Liveness/readiness (unauthenticated) |
+| GET | `/whoami` | Token label lookup (used by the dashboard login) |
 | GET | `/loggers` | Logger inventory with series and latest reading |
 | GET | `/locations` | Locations and time zones |
 | GET | `/series?serial=&identification=&unit=&data_kind=` | Channel/series metadata |
+| GET | `/series/{id}` | One series with reading count and first/last timestamps |
+| GET | `/series/{id}/points?start=&end=&points=&tz=local\|utc` | Server-side bucketed points for charts |
 | GET | `/readings?start=&end=&serial=&channel=&identification=&unit=&location=&series_id=&data_kind=&tz=local\|utc` | Time-series data |
 | GET | `/readings/latest?serial=&channel=&data_kind=` | Most recent reading per series |
 | GET | `/imports?status=&serial=&location=&start=&end=` | Ingest audit trail |
 | GET | `/series/{id}/summary?start=&end=&interval=hour\|day&tz=local\|utc` | Aggregation |
 
-`start` and `end` are required for `/readings` and `/series/{id}/summary`. All endpoints
-except `/health` require `Authorization: Bearer <token>`.
+`start` and `end` are required for `/readings`, `/series/{id}/points`, and
+`/series/{id}/summary`. All endpoints except `/health` require
+`Authorization: Bearer <token>`.
+
+`/series/{id}/points` buckets readings with `date_bin` into at most `points` rows
+(default 2000, capped by `READ_MAX_ROWS`), so high-frequency aquifer-test series can be
+charted without transferring every raw reading. The usual `READ_MAX_WINDOW_DAYS` limit
+applies.
 
 ## Example
 

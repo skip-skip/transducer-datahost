@@ -10,6 +10,7 @@
 | - ingest bearer token only  | -------> | - ingest-api  (upload role)          |
 +-----------------------------+          | - ingest-worker (ingest role)        |
                                          | - read-api    (read role)            |
+                                         | - dashboard   (no DB role)           |
                                          | - postgres:16 (no published port)    |
                                          | - pg_dump backups                    |
                                          +-------------------+------------------+
@@ -17,13 +18,13 @@
                                                              |
                                          +-------------------+------------------+
                                          | Internal consumers                   |
-                                         | - analysts (read API)                |
-                                         | - dashboards (read API)              |
+                                         | - analysts (read API or dashboard)   |
+                                         | - browser dashboard (read token)     |
                                          +--------------------------------------+
 ```
 
 All traffic stays on the internal network. There is no public exposure. Only Caddy
-publishes a host port; PostgreSQL and both application services are reachable only on the
+publishes a host port; PostgreSQL and the application services are reachable only on the
 internal Compose network `backend` (`internal: true`). Caddy also joins a non-internal
 `edge` network, used by no other service, because Docker does not publish host ports for a
 container attached exclusively to internal networks (moby/moby #44986).
@@ -33,13 +34,13 @@ container attached exclusively to internal networks (moby/moby #44986).
 | Source | Destination | Port | Purpose | Rule |
 |---|---|---|---|---|
 | Windows upload host | VM | 8443 | HTTPS uploads | Allow from upload host IP only |
-| Dashboard/analyst subnet | VM | 8443 | Read-only API | Allow from internal subnet |
+| Dashboard/analyst subnet | VM | 8443 | Read-only API and dashboard | Allow from internal subnet |
 | Everything else | VM | 8443 | — | Deny |
 | Any | VM | 5432 | PostgreSQL | Deny (no published port) |
 
 Implementation: `ufw`/`firewalld` on the VM, plus any upstream network ACL. Bind Caddy to
 the internal interface rather than `0.0.0.0` where possible. Never add a Compose `ports:`
-entry for `db`, `ingest-api`, `ingest-worker`, or `read-api`.
+entry for `db`, `ingest-api`, `ingest-worker`, `read-api`, or `dashboard`.
 
 ## 3. PostgreSQL roles
 
@@ -49,6 +50,10 @@ entry for `db`, `ingest-api`, `ingest-worker`, or `read-api`.
 | `transducer_upload` | `SELECT`/`INSERT`/`UPDATE` on `ingest.job`, `SELECT` on `ingest.worker_heartbeat`, `EXECUTE` on `ingest.file_known()`, `USAGE`/`SELECT` on `ingest` sequences; no domain tables, no `DELETE`, no DDL | Ingest API |
 | `transducer_ingest` | `SELECT`/`INSERT`/`UPDATE` on the five domain base tables and the `ingest` queue/heartbeat; `USAGE`/`SELECT` on sequences; no `DELETE`, `TRUNCATE`, or DDL | Ingest worker/loader |
 | `transducer_read` | `SELECT` on `logger`, `location`, `series`, `reading`, and the three read views; no direct `import_file` access, no `ingest` access, no sequences, no writes | Read API |
+
+The dashboard service has **no database role and no database credentials**. It calls the
+read API with the browser user's read token and stores its own JSON state on the
+`dashboard_state` volume.
 
 Rules:
 
@@ -90,6 +95,15 @@ Rules:
 - The token label is recorded on `ingest.job.source_client` and in the API logs for audit.
 - The read API applies authentication at the router level, before opening a database
   connection.
+- The dashboard authenticates the browser with the same read tokens:
+  - Login calls `GET /api/whoami`; success stores `{label, token}` in a signed,
+    `HttpOnly`, `Secure`, `SameSite=Strict` cookie.
+  - Every dashboard data request forwards the token to the read API.
+  - A read API `401` clears the session and redirects to login.
+  - `DASHBOARD_SECRET_KEY` signs the cookie; rotating it invalidates sessions. The
+    cookie is signed, not encrypted, so it must remain `HttpOnly` and TLS-only.
+  - The dashboard sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+    `Referrer-Policy: same-origin`, and a self-only CSP.
 - `/health` is unauthenticated so Compose and the proxy can probe liveness. It exposes no
   data.
 
@@ -111,6 +125,10 @@ Rules:
 - Ingest API accepts only `.xle` uploads, caps body size at `MAX_UPLOAD_BYTES` (10 MB by
   default), and requires the `</Body_xle>` completeness marker.
 - CORS restricted to known dashboard origins (`API_CORS_ORIGINS`); empty by default.
+- The dashboard is server-rendered; the browser never receives a read token in
+  JavaScript and no CORS exception is needed for it.
+- Dashboard mutations are same-origin HTML form posts protected by the `SameSite=Strict`
+  session cookie. Figure state is scoped by the token label.
 - Read request limits: maximum time window and row count per query; pagination required.
 - No SQL string interpolation; parameterized queries only.
 - Caddy is the only public listener and logs requests as JSON.
@@ -119,6 +137,8 @@ Rules:
 ## 7. Backups
 
 - Nightly `pg_dump --format=custom` to a network share.
+- Dashboard state is a JSON file, not a database table. Back it up separately with
+  `docker compose exec dashboard cat /var/lib/transducer-dashboard/state.json`.
 - Retention: 30 daily, 12 monthly (adjust to policy).
 - Backups encrypted at rest by the share/platform.
 - Quarterly restore test into a scratch database.
@@ -146,6 +166,9 @@ Rules:
 - [ ] Separate upload/worker/read roles; no application superuser.
 - [ ] TLS certificate valid for `INGEST_HOSTNAME`; clients trust the CA.
 - [ ] Distinct bearer tokens per upload client and per analyst.
+- [ ] Dashboard container has no `POSTGRES_*` variables or database credentials.
+- [ ] `DASHBOARD_SECRET_KEY` is set and the session cookie is `Secure`.
+- [ ] Dashboard state volume is included in backups and restore tests.
 - [ ] `.env` and TLS material excluded from version control.
 - [ ] Container images pinned to explicit versions.
 - [ ] Automated backups verified by restore.

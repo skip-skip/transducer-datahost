@@ -8,8 +8,9 @@ routes.
 from __future__ import annotations
 
 import ipaddress
+import math
 from collections.abc import Generator
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -20,7 +21,7 @@ from fastapi.responses import JSONResponse
 from psycopg import Connection
 from psycopg.rows import dict_row
 
-from .auth import TokenRegistry, make_bearer_dependency
+from .auth import TokenIdentity, TokenRegistry, make_bearer_dependency
 from .settings import ReadSettings
 
 TZ_CHOICES = {"local", "utc"}
@@ -121,6 +122,12 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
                 content={"status": "unavailable", "database": "unavailable"},
             )
         return JSONResponse(content={"status": "ok", "database": "ok"})
+
+    @router.get("/whoami")
+    def whoami(
+        identity: TokenIdentity = Depends(require_token),
+    ) -> dict[str, str]:
+        return {"label": identity.label}
 
     @router.get("/loggers")
     def loggers(
@@ -395,6 +402,117 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
                 "count": len(rows),
                 "has_more": has_more,
             },
+        }
+
+    @router.get("/series/{series_id}")
+    def series_detail(
+        series_id: int,
+        conn: Connection = Depends(get_conn),
+    ) -> dict[str, Any]:
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                """
+                SELECT
+                    s.series_id, s.serial_number, s.channel_no,
+                    s.identification, s.unit, s.data_kind,
+                    count(r.*) AS reading_count,
+                    min(r.ts) AS first_reading,
+                    max(r.ts) AS last_reading
+                FROM transducer.series s
+                LEFT JOIN transducer.reading r USING (series_id)
+                WHERE s.series_id = %s
+                GROUP BY s.series_id, s.serial_number, s.channel_no,
+                         s.identification, s.unit, s.data_kind
+                """,
+                (series_id,),
+            )
+            row = cur.fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail="series not found")
+        return {"data": _jsonable(row)}
+
+    @router.get("/series/{series_id}/points")
+    def series_points(
+        series_id: int,
+        start: str,
+        end: str,
+        points: int = Query(2000),
+        tz: str = "local",
+        conn: Connection = Depends(get_conn),
+    ) -> dict[str, Any]:
+        if tz not in TZ_CHOICES:
+            raise HTTPException(status_code=400, detail="tz must be local or utc")
+        points = _limit(points, settings.max_rows)
+        start_dt = _parse_local_bound(start, settings.site_timezone)
+        end_dt = _parse_local_bound(end, settings.site_timezone)
+        _window(start_dt, end_dt, settings.max_window_days)
+
+        # Bucket so that the inclusive [start, end] range yields at most
+        # ``points`` rows, no matter how many raw readings it contains.
+        span_seconds = (end_dt - start_dt).total_seconds()
+        if points == 1:
+            width_seconds = max(1, math.ceil(span_seconds))
+        else:
+            width_seconds = max(1, math.ceil(span_seconds / (points - 1)))
+        width = f"{width_seconds} seconds"
+
+        if tz == "utc":
+            origin = start_dt.replace(
+                tzinfo=ZoneInfo(settings.site_timezone)
+            ).astimezone(UTC)
+            sql = """
+                WITH bucketed AS (
+                    SELECT
+                        date_bin(%s::interval, ts_utc, %s::timestamptz) AS bucket,
+                        timezone,
+                        value
+                    FROM transducer.v_reading_utc
+                    WHERE series_id = %s AND ts >= %s AND ts <= %s
+                )
+                SELECT
+                    bucket AT TIME ZONE max(timezone) AS ts,
+                    bucket AS ts_utc,
+                    avg(value) AS value,
+                    min(value) AS min_value,
+                    max(value) AS max_value,
+                    count(*) AS n
+                FROM bucketed
+                GROUP BY bucket
+                ORDER BY bucket
+            """
+            params: tuple[Any, ...] = (width, origin, series_id, start_dt, end_dt)
+        else:
+            sql = """
+                WITH bucketed AS (
+                    SELECT
+                        date_bin(%s::interval, ts, %s::timestamp) AS bucket,
+                        timezone,
+                        value
+                    FROM transducer.v_reading_utc
+                    WHERE series_id = %s AND ts >= %s AND ts <= %s
+                )
+                SELECT
+                    bucket AS ts,
+                    bucket AT TIME ZONE max(timezone) AS ts_utc,
+                    avg(value) AS value,
+                    min(value) AS min_value,
+                    max(value) AS max_value,
+                    count(*) AS n
+                FROM bucketed
+                GROUP BY bucket
+                ORDER BY bucket
+            """
+            params = (width, start_dt, series_id, start_dt, end_dt)
+
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(sql, params)
+            rows = list(cur.fetchall())
+        return {
+            "series_id": series_id,
+            "points": points,
+            "bucket_seconds": width_seconds,
+            "tz": tz,
+            "data": _rows(rows),
         }
 
     @router.get("/series/{series_id}/summary")

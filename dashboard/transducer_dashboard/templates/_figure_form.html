@@ -1,0 +1,58 @@
+{% set selected_series_id = figure.series_id %}
+<form class="figure-form" method="post"
+      action="{{ url_for('update_figure', scope=scope, figure_id=figure.id) }}">
+  <div class="field">
+    <label for="figure-name">Name</label>
+    <input id="figure-name" name="name" value="{{ figure.name }}" required
+           {% if not can_edit %}disabled{% endif %}>
+  </div>
+
+  <div class="field">
+    <label for="source">Source</label>
+    <select id="source" name="serial"
+            hx-get="{{ url_for('analytes_partial') }}"
+            hx-target="#analyte-field"
+            hx-swap="innerHTML"
+            hx-trigger="change"
+            hx-include="this"
+            {% if not can_edit %}disabled{% endif %}>
+      <option value="">Select a source&hellip;</option>
+      {% for source in sources %}
+      <option value="{{ source.serial_number }}"
+        {% if series_detail and series_detail.serial_number == source.serial_number %}selected{% endif %}>
+        {{ source.serial_number }}{% if source.instrument_type %} &middot; {{ source.instrument_type }}{% endif %}{% if source.model_number %} {{ source.model_number }}{% endif %}
+      </option>
+      {% endfor %}
+    </select>
+  </div>
+
+  <div class="field" id="analyte-field">
+    {% include "_analytes.html" %}
+  </div>
+
+  {% if can_edit %}
+  <div class="actions">
+    <button type="submit">Save</button>
+  </div>
+  {% endif %}
+</form>
+
+{% if can_edit %}
+<form method="post"
+      action="{{ url_for('delete_figure', scope=scope, figure_id=figure.id) }}"
+      onsubmit="return confirm('Delete this figure?');">
+  <button type="submit" class="danger">Delete</button>
+</form>
+{% endif %}
+
+<div class="range-bar">
+  {% for key in ranges %}
+  <button type="button" class="range{% if key == range_key %} active{% endif %}"
+          hx-get="{{ url_for('chart_partial') }}?figure_id={{ figure.id }}&scope={{ scope }}&range={{ key }}"
+          hx-target="#chart" hx-swap="innerHTML">{{ key }}</button>
+  {% endfor %}
+</div>
+
+<div id="chart">
+  {% include "_chart.html" %}
+</div>

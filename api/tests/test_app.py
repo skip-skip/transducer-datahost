@@ -28,6 +28,9 @@ class FakeCursor:
     def fetchall(self):
         return []
 
+    def fetchone(self):
+        return None
+
 
 class FakeConnection:
     def cursor(self, row_factory=None):
@@ -150,3 +153,97 @@ def test_readings_rejects_unknown_timezone() -> None:
     )
 
     assert response.status_code == 400
+
+
+def test_whoami_returns_the_token_label() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get("/whoami", headers={"Authorization": "Bearer token"})
+
+    assert response.status_code == 200
+    assert response.json() == {"label": "test"}
+
+
+def test_whoami_requires_a_token() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    assert client.get("/whoami").status_code == 401
+
+
+def test_series_detail_returns_404_when_missing() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/series/999", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 404
+
+
+def test_series_points_rejects_unknown_timezone() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/series/1/points",
+        params={
+            "start": "2026-01-01",
+            "end": "2026-01-02",
+            "tz": "bogus",
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_series_points_rejects_oversized_window() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/series/1/points",
+        params={
+            "start": "2026-01-01",
+            "end": "2026-03-01",
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 400
+
+
+def test_series_points_returns_bounded_bucket_count() -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingCursor(FakeCursor):
+        def execute(self, statement, params=None):
+            captured["statement"] = statement
+            captured["params"] = params
+
+    class CapturingConnection(FakeConnection):
+        def cursor(self, row_factory=None):
+            return CapturingCursor()
+
+    class CapturingDatabase:
+        def connect(self):
+            return CapturingConnection()
+
+    settings = ReadSettings(
+        database=CapturingDatabase(), tokens={"test": "token"}
+    )
+    client = TestClient(create_app(settings))
+
+    response = client.get(
+        "/series/1/points",
+        params={
+            "start": "2026-01-01T00:00:00",
+            "end": "2026-01-02T00:00:00",
+            "points": 100,
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    # One day spread over at most 100 inclusive buckets => ~873 s per bucket.
+    assert response.json()["bucket_seconds"] == 873
+    assert captured["params"][0] == "873 seconds"
+
