@@ -71,6 +71,40 @@ def test_update_and_delete() -> None:
     assert figures.list_figures(state, "personal", "alice") == []
 
 
+def test_update_location_scoping() -> None:
+    state = default_state()
+    figure = figures.create_figure(state, "personal", "alice", NO_EDITORS)
+
+    updated = figures.update_figure(
+        state,
+        "personal",
+        "alice",
+        NO_EDITORS,
+        figure["id"],
+        series_id=42,
+        location_id=7,
+    )
+    assert updated["location_id"] == 7
+
+    # A rename without an explicit location keeps the stored scope (UNSET
+    # semantics), unlike a form save which always sends the field.
+    figures.update_figure(
+        state, "personal", "alice", NO_EDITORS, figure["id"], name="Renamed"
+    )
+    stored = figures.get_figure(state, "personal", "alice", figure["id"])
+    assert stored["name"] == "Renamed"
+    assert stored["location_id"] == 7
+
+    # None clears the scope back to "all locations".
+    figures.update_figure(
+        state, "personal", "alice", NO_EDITORS, figure["id"], location_id=None
+    )
+    assert (
+        figures.get_figure(state, "personal", "alice", figure["id"])["location_id"]
+        is None
+    )
+
+
 def test_update_rejects_blank_name() -> None:
     state = default_state()
     figure = figures.create_figure(state, "personal", "alice", NO_EDITORS)

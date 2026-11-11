@@ -161,6 +161,7 @@ def update_figure(
     *,
     name: str | None = None,
     series_id: int | None | object = UNSET,
+    location_id: int | None | object = UNSET,
     config: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not can_edit(scope, label, shared_editors):
@@ -177,6 +178,8 @@ def update_figure(
         figure["name"] = cleaned
     if series_id is not UNSET:
         figure["series_id"] = series_id
+    if location_id is not UNSET:
+        figure["location_id"] = location_id
     if config is not None:
         figure["config"] = config
     figure["updated_at"] = _now()

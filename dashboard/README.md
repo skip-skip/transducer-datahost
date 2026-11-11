@@ -21,8 +21,11 @@ Writes take a file lock, fsync a temporary file, copy the previous version to
 `state.json.bak`, and atomically replace `state.json`. The container runs one
 uvicorn worker.
 
-A figure binds to a `series_id`. The UI presents **Source** and **Analyte**
-selectors, which resolve to one series via `/loggers` and `/series`.
+A figure binds to a `series_id` plus an optional `location_id`. The UI presents
+**Location** and **Analyte** selectors, which resolve to one series at one
+location via `/locations` and `/locations/{id}/series`; chart points are then
+scoped to that location. Figures saved before this binding (or left on "All
+locations") chart the whole series.
 
 ## Configuration
 

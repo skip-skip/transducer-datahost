@@ -53,6 +53,17 @@ def _default_range(settings: DashboardSettings) -> str:
     return "30d"
 
 
+def _names_from_locations(rows: list[dict[str, Any]]) -> dict[int, str]:
+    """Map ``location_id`` to name from a ``GET /locations`` response."""
+    names: dict[int, str] = {}
+    for row in rows:
+        raw = row.get("location_id") if isinstance(row, dict) else None
+        if isinstance(raw, int):
+            name = row.get("name")
+            names[raw] = name if isinstance(name, str) else ""
+    return names
+
+
 def create_app(
     settings: DashboardSettings | None = None,
     read_client: ReadClient | None = None,
@@ -145,6 +156,8 @@ def create_app(
         session: Session,
         series: dict[str, Any],
         range_key: str,
+        location_id: int | None = None,
+        location_names: dict[int, str] | None = None,
     ) -> dict[str, Any]:
         end = datetime.now(ZoneInfo(settings.site_timezone)).replace(
             tzinfo=None, microsecond=0
@@ -157,15 +170,36 @@ def create_app(
             end=end.isoformat(),
             points=settings.max_points,
             tz="local",
+            location_id=location_id,
         )
-        label = f"{series.get('identification', 'value')} ({series.get('unit', '')})"
+        # The label names the location and the logger so a chart stays
+        # attributable when a location has hosted several instruments.
+        segments: list[str] = []
+        if location_id is not None:
+            name = (location_names or {}).get(location_id)
+            if name:
+                segments.append(name)
+        if series.get("serial_number"):
+            segments.append(str(series["serial_number"]))
+        segments.append(f"{series.get('identification', 'value')} ({series.get('unit', '')})")
+        label = " · ".join(segments)
         return {
             "series_id": series["series_id"],
+            "location_id": location_id,
             "label": label,
             "unit": series.get("unit", ""),
             "range": range_key,
             "points": points,
         }
+
+    def location_names(session: Session) -> dict[int, str]:
+        """Names for chart labels; tolerant of errors other than dead sessions."""
+        try:
+            rows = client.locations(session.token)
+        except ReadApiError as exc:
+            api_failure(exc)  # raises only for a dead session; otherwise no names
+            return {}
+        return _names_from_locations(rows)
 
     def api_failure(exc: ReadApiError) -> str:
         if exc.status_code == 401:
@@ -248,22 +282,37 @@ def create_app(
             )
 
         range_key = range if range in RANGES else _default_range(settings)
-        sources: list[dict[str, Any]] = []
+        locations: list[dict[str, Any]] = []
         analytes: list[dict[str, Any]] = []
-        series_detail: dict[str, Any] | None = None
         chart: dict[str, Any] | None = None
         error: str | None = None
 
         try:
-            sources = client.loggers(session.token)
+            locations = client.locations(session.token)
+            figure_location = figure.get("location_id") if figure else None
+            if figure_location is not None:
+                # Strict scoping: only series with readings recorded at the
+                # bound location, so the selector matches what the chart can
+                # show for a logger that has also served other wells.
+                analytes = client.series_at_location(
+                    session.token, int(figure_location)
+                )
             if figure and figure.get("series_id"):
                 series_detail = client.series_detail(
                     session.token, int(figure["series_id"])
                 )
-                analytes = client.series(
-                    session.token, serial=series_detail["serial_number"]
+                if figure_location is None:
+                    # Figures saved before location scoping (and deliberately
+                    # un-scoped ones) keep the whole series selectable; the
+                    # chart then spans every location the logger served.
+                    analytes = [series_detail]
+                chart = chart_payload(
+                    session,
+                    series_detail,
+                    range_key,
+                    location_id=figure_location,
+                    location_names=_names_from_locations(locations),
                 )
-                chart = chart_payload(session, series_detail, range_key)
         except ReadApiError as exc:
             error = api_failure(exc)
 
@@ -277,9 +326,8 @@ def create_app(
                 figures=figures,
                 figure=figure,
                 ui=ui,
-                sources=sources,
+                locations=locations,
                 analytes=analytes,
-                series_detail=series_detail,
                 chart=chart,
                 range_key=range_key,
                 can_edit=figure_ops.can_edit(
@@ -294,15 +342,29 @@ def create_app(
     @app.get("/partials/analytes", name="analytes_partial", response_class=HTMLResponse)
     def analytes_partial(
         request: Request,
-        serial: str = Query(""),
+        location_id: str = Query(""),
         selected: int | None = Query(None),
         session: Session = Depends(require_session),
     ) -> Response:
         options: list[dict[str, Any]] = []
+        location_chosen = False
         error: str | None = None
-        if serial:
+        if location_id.strip():
+            location_chosen = True
             try:
-                options = client.series(session.token, serial=serial)
+                parsed = int(location_id)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=400, detail="invalid location"
+                ) from exc
+            try:
+                options = client.series_at_location(session.token, parsed)
+            except ReadApiError as exc:
+                error = api_failure(exc)
+        else:
+            # "All locations": offer every series, matching un-scoped figures.
+            try:
+                options = client.series(session.token)
             except ReadApiError as exc:
                 error = api_failure(exc)
         return templates.TemplateResponse(
@@ -312,6 +374,7 @@ def create_app(
                 "request": request,
                 "analytes": options,
                 "selected_series_id": selected,
+                "location_chosen": location_chosen,
                 "error": error,
             },
         )
@@ -333,11 +396,22 @@ def create_app(
         chart: dict[str, Any] | None = None
         error: str | None = None
         if figure.get("series_id"):
+            figure_location = figure.get("location_id")
             try:
                 series_detail = client.series_detail(
                     session.token, int(figure["series_id"])
                 )
-                chart = chart_payload(session, series_detail, range_key)
+                chart = chart_payload(
+                    session,
+                    series_detail,
+                    range_key,
+                    location_id=figure_location,
+                    location_names=(
+                        location_names(session)
+                        if figure_location is not None
+                        else None
+                    ),
+                )
             except ReadApiError as exc:
                 error = api_failure(exc)
         return templates.TemplateResponse(
@@ -378,6 +452,7 @@ def create_app(
         figure_id: str,
         name: str = Form(""),
         series_id: str = Form(""),
+        location_id: str = Form(""),
         session: Session = Depends(require_session),
     ) -> Response:
         if scope not in SCOPES:
@@ -390,6 +465,11 @@ def create_app(
             parsed_series = int(series_id) if series_id.strip() else None
         except ValueError as exc:
             raise HTTPException(status_code=400, detail="invalid series") from exc
+        parsed_location: int | None
+        try:
+            parsed_location = int(location_id) if location_id.strip() else None
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="invalid location") from exc
 
         # Reject binding to a series that does not exist so a stale figure
         # cannot silently render an empty chart forever.
@@ -403,6 +483,28 @@ def create_app(
                     ) from exc
                 api_failure(exc)
 
+        # A location-scoped figure must pair a series that actually has
+        # readings recorded at that location; otherwise the chart would
+        # render permanently empty for a logger that never served the well.
+        if parsed_location is not None:
+            try:
+                at_location = client.series_at_location(
+                    session.token, parsed_location
+                )
+            except ReadApiError as exc:
+                if exc.status_code == 404:
+                    raise HTTPException(
+                        status_code=400, detail="selected location does not exist"
+                    ) from exc
+                api_failure(exc)
+            if parsed_series is not None and parsed_series not in {
+                item.get("series_id") for item in at_location
+            }:
+                raise HTTPException(
+                    status_code=400,
+                    detail="selected series has no readings at this location",
+                )
+
         def operation(state: dict[str, Any]) -> dict[str, Any]:
             existing = figure_ops.get_figure(state, scope, session.label, figure_id)
             config = dict(existing.get("config") or {}) if existing else {}
@@ -414,6 +516,7 @@ def create_app(
                 figure_id,
                 name=cleaned,
                 series_id=parsed_series,
+                location_id=parsed_location,
                 config=config,
             )
 

@@ -77,6 +77,65 @@ def test_rejects_malformed_figure(tmp_path) -> None:
         store.load()
 
 
+def test_accepts_optional_location_id(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    (tmp_path / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "shared": {
+                    "figures": [
+                        {
+                            "id": "abc",
+                            "name": "Figure",
+                            "series_id": 1,
+                            "location_id": 7,
+                            "position": 0,
+                            "config": {},
+                        }
+                    ]
+                },
+                "personal": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    state = store.load()
+
+    assert state["shared"]["figures"][0]["location_id"] == 7
+
+
+def test_rejects_non_integer_location_id(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    (tmp_path / "state.json").write_text(
+        json.dumps(
+            {
+                "version": 1,
+                "shared": {
+                    "figures": [
+                        {
+                            "id": "abc",
+                            "name": "Figure",
+                            "series_id": 1,
+                            "location_id": "7",
+                            "position": 0,
+                            "config": {},
+                        }
+                    ]
+                },
+                "personal": {},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(StateError, match="location_id"):
+        store.load()
+
+
 def test_mutate_does_not_persist_invalid_state(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()

@@ -65,6 +65,20 @@ class ReadClient:
         data = payload.get("data") if isinstance(payload, dict) else None
         return data if isinstance(data, list) else []
 
+    def locations(self, token: str) -> list[dict[str, Any]]:
+        payload = self._get(token, "/locations")
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, list) else []
+
+    def series_at_location(
+        self, token: str, location_id: int, *, limit: int = 1000
+    ) -> list[dict[str, Any]]:
+        payload = self._get(
+            token, f"/locations/{location_id}/series", params={"limit": limit}
+        )
+        data = payload.get("data") if isinstance(payload, dict) else None
+        return data if isinstance(data, list) else []
+
     def series(
         self,
         token: str,
@@ -95,16 +109,20 @@ class ReadClient:
         end: str,
         points: int,
         tz: str = "local",
+        location_id: int | None = None,
     ) -> list[dict[str, Any]]:
+        params: dict[str, Any] = {
+            "start": start,
+            "end": end,
+            "points": points,
+            "tz": tz,
+        }
+        if location_id is not None:
+            params["location_id"] = location_id
         payload = self._get(
             token,
             f"/series/{series_id}/points",
-            params={
-                "start": start,
-                "end": end,
-                "points": points,
-                "tz": tz,
-            },
+            params=params,
         )
         data = payload.get("data") if isinstance(payload, dict) else None
         return data if isinstance(data, list) else []

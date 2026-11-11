@@ -174,6 +174,50 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
             )
             return {"data": _rows(list(cur.fetchall()))}
 
+    @router.get("/locations/{location_id}/series")
+    def location_series(
+        location_id: int,
+        limit: int = Query(1000),
+        offset: int = 0,
+        conn: Connection = Depends(get_conn),
+    ) -> dict[str, Any]:
+        limit = _limit(limit, settings.max_rows)
+        offset = max(0, offset)
+        with conn.cursor(row_factory=dict_row) as cur:
+            cur.execute(
+                "SELECT 1 FROM transducer.location WHERE location_id = %s",
+                (location_id,),
+            )
+            if cur.fetchone() is None:
+                raise HTTPException(status_code=404, detail="location not found")
+            # Location is not a column of `series`: it reaches readings only
+            # through import_file. v_reading exposes that join to the read
+            # role, so the counts below cover readings recorded at this
+            # location even when the logger also served others.
+            cur.execute(
+                """
+                SELECT
+                    s.series_id, s.serial_number, s.channel_no,
+                    s.identification, s.unit, s.data_kind,
+                    count(*) AS reading_count,
+                    min(vr.ts) AS first_reading,
+                    max(vr.ts) AS last_reading
+                FROM transducer.series s
+                JOIN transducer.v_reading vr ON vr.series_id = s.series_id
+                WHERE vr.location_id = %s
+                GROUP BY s.series_id, s.serial_number, s.channel_no,
+                         s.identification, s.unit, s.data_kind
+                ORDER BY s.serial_number, s.channel_no, s.identification
+                LIMIT %s OFFSET %s
+                """,
+                (location_id, limit, offset),
+            )
+            rows = list(cur.fetchall())
+        return {
+            "data": _rows(rows),
+            "pagination": {"limit": limit, "offset": offset, "count": len(rows)},
+        }
+
     @router.get("/series")
     def series(
         serial: str | None = None,
@@ -438,6 +482,7 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
         end: str,
         points: int = Query(2000),
         tz: str = "local",
+        location_id: int | None = None,
         conn: Connection = Depends(get_conn),
     ) -> dict[str, Any]:
         if tz not in TZ_CHOICES:
@@ -446,6 +491,16 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
         start_dt = _parse_local_bound(start, settings.site_timezone)
         end_dt = _parse_local_bound(end, settings.site_timezone)
         _window(start_dt, end_dt, settings.max_window_days)
+
+        # Optional location scope. Loggers move between locations, so one
+        # series can mix deployments; filtering through v_reading_utc keeps
+        # the buckets to readings recorded at the requested location.
+        clauses = ["series_id = %s", "ts >= %s", "ts <= %s"]
+        filter_params: list[Any] = [series_id, start_dt, end_dt]
+        if location_id is not None:
+            clauses.append("location_id = %s")
+            filter_params.append(location_id)
+        where = " AND ".join(clauses)
 
         # Bucket so that the inclusive [start, end] range yields at most
         # ``points`` rows, no matter how many raw readings it contains.
@@ -460,14 +515,14 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
             origin = start_dt.replace(
                 tzinfo=ZoneInfo(settings.site_timezone)
             ).astimezone(UTC)
-            sql = """
+            sql = f"""
                 WITH bucketed AS (
                     SELECT
                         date_bin(%s::interval, ts_utc, %s::timestamptz) AS bucket,
                         timezone,
                         value
                     FROM transducer.v_reading_utc
-                    WHERE series_id = %s AND ts >= %s AND ts <= %s
+                    WHERE {where}
                 )
                 SELECT
                     bucket AT TIME ZONE max(timezone) AS ts,
@@ -480,16 +535,16 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
                 GROUP BY bucket
                 ORDER BY bucket
             """
-            params: tuple[Any, ...] = (width, origin, series_id, start_dt, end_dt)
+            params: tuple[Any, ...] = (width, origin, *filter_params)
         else:
-            sql = """
+            sql = f"""
                 WITH bucketed AS (
                     SELECT
                         date_bin(%s::interval, ts, %s::timestamp) AS bucket,
                         timezone,
                         value
                     FROM transducer.v_reading_utc
-                    WHERE series_id = %s AND ts >= %s AND ts <= %s
+                    WHERE {where}
                 )
                 SELECT
                     bucket AS ts,
@@ -502,13 +557,14 @@ def create_app(settings: ReadSettings | None = None) -> FastAPI:
                 GROUP BY bucket
                 ORDER BY bucket
             """
-            params = (width, start_dt, series_id, start_dt, end_dt)
+            params = (width, start_dt, *filter_params)
 
         with conn.cursor(row_factory=dict_row) as cur:
             cur.execute(sql, params)
             rows = list(cur.fetchall())
         return {
             "series_id": series_id,
+            "location_id": location_id,
             "points": points,
             "bucket_seconds": width_seconds,
             "tz": tz,

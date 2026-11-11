@@ -171,11 +171,15 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - [x] `dashboard/transducer_dashboard/`: settings, signed session auth, JSON state store,
   figure operations, read API client, and the FastAPI app.
 - [x] Templates and static assets (HTMX and Plotly vendored) for the collapsible folder
-  pane, figure editor (name, source, analyte, range), and Plotly timeseries chart.
+  pane, figure editor (name, location, analyte, range), and Plotly timeseries chart.
 - [x] Personal figures per read-token label plus shared figures with an optional editor
   allowlist.
+- [x] Location-based figure selection (ADR-027): figures bind
+  `(location_id, series_id)`, analyte lists are scoped to series with readings at
+  the location, and charts pull location-scoped points. Figures saved before the
+  change stay un-scoped ("all locations") until re-saved.
 - [x] Read API additions: `/whoami`, `/series/{id}`, `/series/{id}/points` (server-side
-  bucketing).
+  bucketing, optional `location_id` scope), `/locations/{id}/series`.
 - [x] Dockerfile, Compose service, `dashboard_state` volume, and Caddy `/dashboard/*`
   route.
 - [x] Unit tests for settings, state, figures, read client, and app routes.

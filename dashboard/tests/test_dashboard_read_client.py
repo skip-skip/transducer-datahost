@@ -71,6 +71,43 @@ def test_missing_series_raises_404() -> None:
     assert excinfo.value.status_code == 404
 
 
+def test_locations_and_location_scoped_series() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/locations":
+            return httpx.Response(
+                200, json={"data": [{"location_id": 3, "name": "MCMW-04"}]}
+            )
+        if request.url.path == "/locations/3/series":
+            assert request.url.params["limit"] == "1000"
+            return httpx.Response(200, json={"data": [{"series_id": 9}]})
+        return httpx.Response(404)
+
+    client = make_client(handler)
+
+    assert client.locations("t")[0]["name"] == "MCMW-04"
+    assert client.series_at_location("t", 3)[0]["series_id"] == 9
+
+
+def test_points_forward_location_scope() -> None:
+    seen = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/series/9/points":
+            seen["location_id"] = request.url.params.get("location_id")
+            return httpx.Response(200, json={"data": [{"value": 1.0}]})
+        return httpx.Response(404)
+
+    client = make_client(handler)
+
+    assert client.points(
+        "t", 9, start="a", end="b", points=5, location_id=3
+    )[0]["value"] == 1.0
+    assert seen["location_id"] == "3"
+
+    client.points("t", 9, start="a", end="b", points=5)
+    assert seen["location_id"] is None
+
+
 def test_transport_failure_becomes_502() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("down", request=request)

@@ -180,6 +180,70 @@ def test_series_detail_returns_404_when_missing() -> None:
     assert response.status_code == 404
 
 
+def test_location_series_returns_404_when_location_missing() -> None:
+    client = TestClient(create_app(make_settings()))
+
+    response = client.get(
+        "/locations/999/series", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "location not found"
+
+
+def test_location_series_scopes_counts_to_the_location() -> None:
+    statements: list[str] = []
+    params_log: list[tuple] = []
+
+    class LoggingCursor(FakeCursor):
+        def execute(self, statement, params=None):
+            statements.append(statement)
+            params_log.append(params)
+
+        def fetchone(self):
+            return {"ok": 1}
+
+        def fetchall(self):
+            return [
+                {
+                    "series_id": 7,
+                    "serial_number": "1096043",
+                    "channel_no": 1,
+                    "identification": "LEVEL",
+                    "unit": "m",
+                    "data_kind": "uncompensated",
+                    "reading_count": 5,
+                    "first_reading": datetime(2026, 1, 1),
+                    "last_reading": datetime(2026, 1, 2),
+                }
+            ]
+
+    class LoggingConnection(FakeConnection):
+        def cursor(self, row_factory=None):
+            return LoggingCursor()
+
+    class LoggingDatabase:
+        def connect(self):
+            return LoggingConnection()
+
+    settings = ReadSettings(database=LoggingDatabase(), tokens={"test": "token"})
+    client = TestClient(create_app(settings))
+
+    response = client.get(
+        "/locations/3/series", headers={"Authorization": "Bearer token"}
+    )
+
+    assert response.status_code == 200
+    rows = response.json()["data"]
+    assert rows[0]["series_id"] == 7
+    assert rows[0]["reading_count"] == 5
+    # The series query reaches readings through the read-role view and is
+    # parameterized by the requested location.
+    assert "v_reading" in statements[1]
+    assert "vr.location_id = %s" in statements[1]
+    assert params_log[1] == (3, 1000, 0)
+
+
 def test_series_points_rejects_unknown_timezone() -> None:
     client = TestClient(create_app(make_settings()))
 
@@ -246,4 +310,81 @@ def test_series_points_returns_bounded_bucket_count() -> None:
     # One day spread over at most 100 inclusive buckets => ~873 s per bucket.
     assert response.json()["bucket_seconds"] == 873
     assert captured["params"][0] == "873 seconds"
+    assert "location_id = %s" not in captured["statement"]
+
+
+def test_series_points_accepts_a_location_scope() -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingCursor(FakeCursor):
+        def execute(self, statement, params=None):
+            captured["statement"] = statement
+            captured["params"] = params
+
+    class CapturingConnection(FakeConnection):
+        def cursor(self, row_factory=None):
+            return CapturingCursor()
+
+    class CapturingDatabase:
+        def connect(self):
+            return CapturingConnection()
+
+    settings = ReadSettings(
+        database=CapturingDatabase(), tokens={"test": "token"}
+    )
+    client = TestClient(create_app(settings))
+
+    response = client.get(
+        "/series/1/points",
+        params={
+            "start": "2026-01-01T00:00:00",
+            "end": "2026-01-02T00:00:00",
+            "points": 100,
+            "location_id": 5,
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert "location_id = %s" in captured["statement"]
+    assert 5 in captured["params"]
+    assert response.json()["location_id"] == 5
+
+
+def test_series_points_location_scope_works_in_utc_mode() -> None:
+    captured: dict[str, object] = {}
+
+    class CapturingCursor(FakeCursor):
+        def execute(self, statement, params=None):
+            captured["statement"] = statement
+            captured["params"] = params
+
+    class CapturingConnection(FakeConnection):
+        def cursor(self, row_factory=None):
+            return CapturingCursor()
+
+    class CapturingDatabase:
+        def connect(self):
+            return CapturingConnection()
+
+    settings = ReadSettings(
+        database=CapturingDatabase(), tokens={"test": "token"}
+    )
+    client = TestClient(create_app(settings))
+
+    response = client.get(
+        "/series/1/points",
+        params={
+            "start": "2026-01-01T00:00:00",
+            "end": "2026-01-02T00:00:00",
+            "points": 100,
+            "tz": "utc",
+            "location_id": 5,
+        },
+        headers={"Authorization": "Bearer token"},
+    )
+
+    assert response.status_code == 200
+    assert "location_id = %s" in captured["statement"]
+    assert captured["params"][-1] == 5
 

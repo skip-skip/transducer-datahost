@@ -571,3 +571,40 @@ The service adds only read-only endpoints to the API: `/whoami`, `/series/{id}`,
 - One uvicorn worker keeps the read-modify-write model simple; the file lock is still used.
 - `DASHBOARD_SHARED_EDITORS` optionally restricts shared edits; otherwise any valid read
   token may edit shared figures.
+
+---
+
+## ADR-027: Select dashboard figures by location, not logger
+
+**Status:** Accepted
+
+**Context:** Figures were reached by picking a logger serial ("Source") and then one of
+its series. In this dataset loggers move between wells — one serial appears at `MCMW-04`,
+`MCDMW-04`, and `MCDMW-04_AT` — and `series` carries no location: a reading's location
+comes from its `import_file`. A series-level pull therefore mixed readings recorded at
+several locations into one chart.
+
+**Decision:** Bind figures to `(location_id, series_id)` with strict scoping:
+
+- The analyte list for a location shows only series that have readings recorded there
+  (`GET /locations/{id}/series`, a new read-only endpoint over `v_reading`).
+- Chart points accept an optional `location_id` filter (`/series/{id}/points`), applied
+  through `v_reading_utc` so the read role needs no new table grants.
+- Saving rejects a series that does not exist and a location/series pair with no
+  readings together.
+- `location_id` is optional in dashboard state (version stays 1): figures saved before
+  this change, or deliberately left un-scoped, chart the whole series, and the location
+  selector shows "All locations" until re-saved.
+- Analyte option labels include the logger serial, because a location can host more
+  than one instrument over time.
+
+**Consequences:**
+
+- Charts answer "what happened at this well" without cross-deployment contamination.
+- Two small read-only additions to the API; no schema, role, or write-path changes.
+- Legacy figures keep rendering but mix locations until re-bound — acceptable as a
+  transition, and re-saving each figure fixes it.
+- A location with one logger still shows the serial on every analyte label, which is
+  the cost of disambiguation.
+- Selecting "All locations" remains possible and behaves like a legacy figure; it is
+  offered for continuity rather than recommended for new figures.

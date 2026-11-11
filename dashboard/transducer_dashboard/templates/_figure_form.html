@@ -8,19 +8,19 @@
   </div>
 
   <div class="field">
-    <label for="source">Source</label>
-    <select id="source" name="serial"
+    <label for="location">Location</label>
+    <select id="location" name="location_id"
             hx-get="{{ url_for('analytes_partial') }}"
             hx-target="#analyte-field"
             hx-swap="innerHTML"
             hx-trigger="change"
             hx-include="this"
             {% if not can_edit %}disabled{% endif %}>
-      <option value="">Select a source&hellip;</option>
-      {% for source in sources %}
-      <option value="{{ source.serial_number }}"
-        {% if series_detail and series_detail.serial_number == source.serial_number %}selected{% endif %}>
-        {{ source.serial_number }}{% if source.instrument_type %} &middot; {{ source.instrument_type }}{% endif %}{% if source.model_number %} {{ source.model_number }}{% endif %}
+      <option value="">All locations</option>
+      {% for location in locations %}
+      <option value="{{ location.location_id }}"
+        {% if figure.location_id is not none and figure.location_id == location.location_id %}selected{% endif %}>
+        {{ location.name }}
       </option>
       {% endfor %}
     </select>

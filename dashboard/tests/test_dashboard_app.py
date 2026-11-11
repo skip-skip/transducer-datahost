@@ -15,6 +15,17 @@ LOGGERS = [
         "series_count": 1,
     }
 ]
+LOCATIONS = [
+    {
+        "location_id": 7,
+        "name": "MCMW-04",
+        "base_location": None,
+        "is_aquifer_test": False,
+        "latitude": None,
+        "longitude": None,
+        "timezone": "America/New_York",
+    }
+]
 SERIES = [
     {
         "series_id": 42,
@@ -23,6 +34,9 @@ SERIES = [
         "identification": "LEVEL",
         "unit": "m",
         "data_kind": "uncompensated",
+        "reading_count": 3,
+        "first_reading": "2026-01-01T00:00:00",
+        "last_reading": "2026-01-01T00:10:00",
     }
 ]
 DETAIL = {
@@ -49,6 +63,9 @@ POINTS = [
 
 
 class FakeReadClient:
+    def __init__(self) -> None:
+        self.points_calls: list[dict[str, object]] = []
+
     def whoami(self, token: str) -> str:
         labels = {"good": "alice", "viewer": "bob"}
         if token not in labels:
@@ -59,10 +76,22 @@ class FakeReadClient:
         self._check(token)
         return LOGGERS
 
+    def locations(self, token: str):
+        self._check(token)
+        return LOCATIONS
+
     def series(self, token: str, *, serial=None, limit=1000):
         self._check(token)
         if serial is None or serial == "1096043":
             return SERIES
+        return []
+
+    def series_at_location(self, token: str, location_id: int, *, limit=1000):
+        self._check(token)
+        if location_id == 7:
+            return SERIES
+        if location_id == 999:
+            raise ReadApiError(404, "not found")
         return []
 
     def series_detail(self, token: str, series_id: int):
@@ -71,8 +100,21 @@ class FakeReadClient:
             raise ReadApiError(404, "not found")
         return DETAIL
 
-    def points(self, token: str, series_id: int, *, start, end, points, tz="local"):
+    def points(
+        self,
+        token: str,
+        series_id: int,
+        *,
+        start,
+        end,
+        points,
+        tz="local",
+        location_id=None,
+    ):
         self._check(token)
+        self.points_calls.append(
+            {"series_id": series_id, "location_id": location_id}
+        )
         return POINTS
 
     @staticmethod
@@ -178,7 +220,7 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
 
     updated = client.post(
         f"/figures/personal/{figure_id}",
-        data={"name": "GC-1980 water level", "series_id": "42"},
+        data={"name": "GC-1980 water level", "series_id": "42", "location_id": "7"},
         follow_redirects=False,
     )
     assert updated.status_code == 303
@@ -187,11 +229,13 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
     figure = state["personal"]["alice"]["figures"][0]
     assert figure["name"] == "GC-1980 water level"
     assert figure["series_id"] == 42
+    assert figure["location_id"] == 7
 
     page = client.get("/")
     assert page.status_code == 200
     assert "GC-1980 water level" in page.text
     assert "chart-data" in page.text
+    assert "MCMW-04" in page.text
     assert "LEVEL (m)" in page.text
 
     deleted = client.post(
@@ -199,6 +243,52 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
     )
     assert deleted.status_code == 303
     assert read_state(tmp_path)["personal"]["alice"]["figures"] == []
+
+
+def test_location_scoped_chart_requests_location_points(tmp_path) -> None:
+    fake = FakeReadClient()
+    app = create_app(make_settings(tmp_path), fake)
+    with TestClient(app) as test_client:
+        login(test_client)
+        test_client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
+        figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+        saved = test_client.post(
+            f"/figures/personal/{figure_id}",
+            data={"name": "MCMW-04 level", "series_id": "42", "location_id": "7"},
+            follow_redirects=False,
+        )
+        assert saved.status_code == 303
+
+        page = test_client.get("/")
+        assert page.status_code == 200
+        assert "chart-data" in page.text
+
+        assert fake.points_calls, "the chart render should request points"
+        assert all(call["location_id"] == 7 for call in fake.points_calls)
+
+
+def test_legacy_figure_without_location_charts_whole_series(
+    client: TestClient, tmp_path
+) -> None:
+    login(client)
+    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
+    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+
+    saved = client.post(
+        f"/figures/personal/{figure_id}",
+        data={"name": "Legacy", "series_id": "42"},
+        follow_redirects=False,
+    )
+    assert saved.status_code == 303
+
+    figure = read_state(tmp_path)["personal"]["alice"]["figures"][0]
+    assert figure["series_id"] == 42
+    assert figure.get("location_id") is None
+
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "All locations" in page.text
+    assert "chart-data" in page.text
 
 
 def test_update_rejects_blank_name(client: TestClient, tmp_path) -> None:
@@ -228,6 +318,36 @@ def test_update_rejects_unknown_series(client: TestClient, tmp_path) -> None:
 
     assert response.status_code == 400
     assert "does not exist" in response.text
+
+
+def test_update_rejects_series_not_at_location(client: TestClient, tmp_path) -> None:
+    login(client)
+    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
+    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+
+    response = client.post(
+        f"/figures/personal/{figure_id}",
+        data={"name": "Broken", "series_id": "42", "location_id": "8"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "no readings at this location" in response.text
+
+
+def test_update_rejects_unknown_location(client: TestClient, tmp_path) -> None:
+    login(client)
+    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
+    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+
+    response = client.post(
+        f"/figures/personal/{figure_id}",
+        data={"name": "Broken", "series_id": "42", "location_id": "999"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 400
+    assert "location does not exist" in response.text
 
 
 def test_shared_figure_permissions(tmp_path) -> None:
@@ -269,13 +389,35 @@ def test_toggle_folders_persists(client: TestClient, tmp_path) -> None:
     assert ui["personal"]["folders_collapsed"] is True
 
 
-def test_analytes_partial(client: TestClient) -> None:
+def test_analytes_partial_scoped_to_location(client: TestClient) -> None:
     login(client)
 
-    response = client.get("/partials/analytes", params={"serial": "1096043"})
+    response = client.get("/partials/analytes", params={"location_id": "7"})
 
     assert response.status_code == 200
     assert "LEVEL (m)" in response.text
+    assert "1096043" in response.text
+
+
+def test_analytes_partial_empty_location_reports_hint(client: TestClient) -> None:
+    login(client)
+
+    response = client.get("/partials/analytes", params={"location_id": "8"})
+
+    assert response.status_code == 200
+    assert "No analytes at this location." in response.text
+
+
+def test_analytes_partial_all_locations_lists_every_series(
+    client: TestClient,
+) -> None:
+    login(client)
+
+    response = client.get("/partials/analytes", params={"location_id": ""})
+
+    assert response.status_code == 200
+    assert "LEVEL (m)" in response.text
+    assert "No analytes at this location." not in response.text
 
 
 def test_chart_partial(client: TestClient, tmp_path) -> None:

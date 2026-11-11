@@ -31,7 +31,7 @@
     {% else %}
     <section class="empty">
       <h1>No figure selected</h1>
-      <p>Create a figure to chart a source and analyte.</p>
+      <p>Create a figure to chart a location and analyte.</p>
       <form method="post" action="{{ url_for('create_figure') }}">
         <input type="hidden" name="scope" value="{{ scope }}">
         <button type="submit">Create a figure</button>

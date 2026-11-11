@@ -61,6 +61,7 @@ in PostgreSQL.
         "id": "5f0c8e...",
         "name": "GC-1980 water level",
         "series_id": 42,
+        "location_id": 7,
         "position": 0,
         "config": {},
         "created_by": "analyst-1",
@@ -85,9 +86,13 @@ in PostgreSQL.
 
 Rules:
 
-- A figure binds to a `series_id`. Source and analyte are UI selectors that
-  resolve to one series, so multi-channel loggers and unit changes stay
-  unambiguous.
+- A figure binds to a `series_id` and, since location-based selection, an
+  optional `location_id`. Location and analyte are UI selectors that resolve
+  to one series at one location, so multi-channel loggers, unit changes, and
+  loggers that moved between wells stay unambiguous.
+- `location_id` is null for figures saved before location scoping and for
+  deliberately un-scoped ones: they chart the whole series across every
+  location, and the location selector shows "All locations" until re-saved.
 - Personal figures are visible only to the matching token label.
 - Shared figures are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
   optionally restricts who may edit them; empty means any valid read key.
@@ -116,13 +121,18 @@ Left pane:
 Main view:
 
 - `Name`: used in the folder list.
-- `Source`: logger serial from `GET /api/loggers`.
-- `Analyte`: series from `GET /api/series?serial=...`; the value is `series_id`.
+- `Location`: well from `GET /api/locations`; the value is `location_id`, and
+  the empty choice means "all locations".
+- `Analyte`: series from `GET /api/locations/{id}/series`; the value is
+  `series_id`. Option labels carry the logger serial because a location can
+  host more than one instrument over time.
 - Range buttons: `24h`, `7d`, `30d`; charts use server-side bucketing.
 - `Save` and `Delete`.
 
-A new figure starts as a draft with a default name and no series. If a source has
-no series, the analyte selector reports it.
+A new figure starts as a draft with a default name and no series. Saving
+rejects a series that does not exist and a location/series pair with no
+readings together, so a figure cannot silently render an empty chart. A
+location with no series reports it in the analyte selector.
 
 ## 5. Read API additions
 
@@ -132,11 +142,17 @@ All additions are read-only and require no schema change:
 |---|---|
 | `GET /whoami` | Returns the token label as `{"label": "..."}` |
 | `GET /series/{id}` | One series with reading count and first/last timestamps |
-| `GET /series/{id}/points?start=&end=&points=&tz=` | Server-side time buckets (`ts`, `ts_utc`, `value`, `min_value`, `max_value`, `n`) bounded by `points` |
+| `GET /locations/{id}/series` | Series with readings recorded at one location, with location-scoped counts (404 when the location is unknown) |
+| `GET /series/{id}/points?start=&end=&points=&tz=&location_id=` | Server-side time buckets (`ts`, `ts_utc`, `value`, `min_value`, `max_value`, `n`) bounded by `points`; the optional `location_id` restricts buckets to readings recorded at that location |
 
 `/points` uses `date_bin` with a width chosen so the inclusive window returns at
 most `points` rows. The existing `READ_MAX_WINDOW_DAYS` and `READ_MAX_ROWS`
 limits still apply.
+
+Location scoping matters because loggers move between wells: `series` carries no
+location, and a reading's location comes from its `import_file`. Both new
+queries filter through `v_reading`/`v_reading_utc`, so the read role needs no
+new table grants and an un-scoped request keeps returning the whole series.
 
 ## 6. Configuration
 
@@ -209,8 +225,9 @@ safe.
 ## 8. Verification
 
 1. Log in with a valid read token; an invalid token is rejected.
-2. Create a personal figure, a shared figure, rename, change source/analyte,
-   change range, and delete.
+2. Create a personal figure, a shared figure, rename, change location/analyte,
+   change range, and delete. Pick a well whose logger also served another
+   location and confirm the chart excludes the other deployments.
 3. Restart the dashboard container; figures and selected state survive.
 4. Log in with a second token: shared figures are visible, the first user's
    personal figures are not.

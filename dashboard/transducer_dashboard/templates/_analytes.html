@@ -5,8 +5,8 @@
   {% for item in analytes %}
   <option value="{{ item.series_id }}"
     {% if selected_series_id and item.series_id == selected_series_id %}selected{% endif %}>
-    {{ item.identification }} ({{ item.unit }}){% if item.channel_no %} &middot; ch {{ item.channel_no }}{% endif %}{% if item.data_kind %} &middot; {{ item.data_kind }}{% endif %}
+    {{ item.identification }} ({{ item.unit }}){% if item.channel_no %} &middot; ch {{ item.channel_no }}{% endif %}{% if item.serial_number %} &middot; {{ item.serial_number }}{% endif %}{% if item.data_kind %} &middot; {{ item.data_kind }}{% endif %}
   </option>
   {% endfor %}
 </select>
-{% if analytes is defined and not analytes %}<p class="hint">No analytes for this source.</p>{% endif %}
+{% if location_chosen is defined and location_chosen and not analytes %}<p class="hint">No analytes at this location.</p>{% endif %}

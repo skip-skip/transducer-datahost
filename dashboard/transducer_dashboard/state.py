@@ -52,6 +52,11 @@ def _ensure_figure(figure: Any, where: str) -> dict[str, Any]:
     series_id = figure.get("series_id")
     if series_id is not None and not isinstance(series_id, int):
         raise StateError(f"{where}.series_id must be an integer or null")
+    # Optional since location-based figure selection; figures saved before it
+    # (or explicitly un-scoped) carry no location and mean "all locations".
+    location_id = figure.get("location_id")
+    if location_id is not None and not isinstance(location_id, int):
+        raise StateError(f"{where}.location_id must be an integer or null")
     position = figure.get("position", 0)
     if not isinstance(position, int):
         raise StateError(f"{where}.position must be an integer")
