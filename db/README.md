@@ -75,7 +75,9 @@ db/tests/verify_phase1.sh
 ```
 
 The script refuses database names that do not end in `_test` unless `ALLOW_NON_TEST_DB=1`
-is set. It inserts reserved test rows and removes them on exit.
+is set. It inserts reserved test rows and removes them on exit. It is safe to run against a
+live stack: the queued test job is scheduled a day out, so a running `ingest-worker` will not
+claim it.
 
 It checks, among other things:
 

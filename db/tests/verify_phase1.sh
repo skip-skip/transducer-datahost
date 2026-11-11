@@ -410,11 +410,25 @@ check_bool "upload has no SELECT on import_file" 'f' \
 check_bool "upload has no SELECT on reading" 'f' \
     "SELECT has_table_privilege('$UPLOAD_USER', 'transducer.reading', 'SELECT');"
 
-JOB_ID=$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
-    INSERT INTO ingest.job (sha256, filename, byte_size, source_client)
-    VALUES ('$TEST_SHA', '__verify_phase1_job.xle', 1234, 'verify')
+# Schedule the test job in the future so a live ingest worker never claims it.
+# claim_job() only picks up rows whose next_attempt_at is null or already due;
+# the claim check below updates by job_id and ignores that column. Without
+# this, the worker consumes the row, fails it as "file missing from queued
+# spool", and the claim check sees no queued job.
+if ! JOB_ID=$(role_psql "$UPLOAD_USER" "$UPLOAD_PASSWORD" -Atc "
+    INSERT INTO ingest.job
+        (sha256, filename, byte_size, source_client, next_attempt_at)
+    VALUES ('$TEST_SHA', '__verify_phase1_job.xle', 1234, 'verify',
+            now() + interval '1 day')
     RETURNING job_id;
-")
+" 2>&1); then
+    fail "upload can enqueue a job ($JOB_ID)"
+    exit 1
+fi
+if [ -z "$JOB_ID" ]; then
+    fail "upload can enqueue a job (no job_id returned)"
+    exit 1
+fi
 pass "upload can enqueue a job (sequence usable)"
 
 check_equal "upload sees its queued job" 'queued|__verify_phase1_job.xle' \
