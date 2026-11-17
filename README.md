@@ -27,8 +27,8 @@ In scope:
 - Record per-file provenance and validation status.
 - Serve read-only data to internal consumers through a bearer-token HTTP API.
 - Return timestamps as local time or UTC on request.
-- Provide a dashboard of timeseries figures (personal and shared) that uses the read API
-  keys.
+- Provide a dashboard of shared scenes, each a gridded collection of time-series figures,
+  that uses the read API keys.
 
 Out of scope for v1:
 
@@ -89,7 +89,7 @@ dashboard signs in with a read API token and never receives a database credentia
 | `db/tests/` | Phase 1 acceptance checks | Implemented |
 | `ingest/` | `.xle` parser/loader plus the upload API, queue worker, uploader CLI, and migration runner | Implemented |
 | `api/` | Read-only FastAPI service | Implemented |
-| `dashboard/` | Dashboard service: read-token auth, JSON figure state, HTMX/Plotly UI | Implemented |
+| `dashboard/` | Dashboard service: read-token auth, JSON scene state; Panel/Bokeh rework in progress | Partial |
 | `caddy/` | TLS reverse proxy configuration and image | Implemented |
 | `certs/` | Local TLS certificate instructions (certificates not committed) | Instructions |
 | `scripts/` | Manual upload, migration, and (planned) backup/restore helpers | Partial |

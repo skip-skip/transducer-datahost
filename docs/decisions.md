@@ -608,3 +608,62 @@ several locations into one chart.
   the cost of disambiguation.
 - Selecting "All locations" remains possible and behaves like a legacy figure; it is
   offered for continuity rather than recommended for new figures.
+
+---
+
+## ADR-028: Use HoloViz Panel for the dashboard frontend
+
+**Status:** Accepted (implementation in progress)
+
+**Context:** The dashboard v1 UI is FastAPI + Jinja2 + HTMX + Plotly. It renders a
+single selected figure at a time and keeps figures in a flat folder list. A scenes
+redesign was attempted on top of that stack and then reverted. A React rewrite was
+considered and rejected. The operator wants a Python-only frontend with a gridded scene
+canvas, a collapsible scene tray, and a settings tray, while keeping the existing
+FastAPI service, read-API boundary, signed read-token session, and JSON state volume.
+
+HoloViz Panel is already used in the environment, provides a `GridStack` layout with
+drag and resize, and since Panel 1.5 can be mounted directly in FastAPI with
+`panel.io.fastapi.add_applications`.
+
+**Decision:** Replace the Jinja2/HTMX/Plotly UI with a Panel + Bokeh application mounted
+inside the existing FastAPI service.
+
+- Panel **>= 1.5** is required; the runtime image installs it and the development
+  environment is upgraded from 1.4.4.
+- FastAPI keeps `/login`, `/logout`, `/health`, the security headers, the read client,
+  and the JSON state store. Panel owns the dashboard UI.
+- State moves to version 2: a list of **shared** scenes, each with gridded figures.
+  There is no personal/shared split and no editor allowlist in the MVP; any valid read
+  token may create/delete scenes and edit figures.
+- A version 1 state file is archived as `state.v1.json` and replaced with an empty
+  version 2 document. Personal figures are not published into shared scenes.
+- The grid is fixed at 12 columns and 220 px rows. Figures have a minimum size of
+  3 x 2 cells.
+- Only time-series figures are implemented. Charts use Bokeh directly through
+  `pn.pane.Bokeh`.
+- The Jinja templates, HTMX, Plotly, and vendored GridStack assets are removed. No Node
+  build step is introduced.
+
+The detailed component, state, interaction, and test design is in
+[dashboard-panel-design.md](dashboard-panel-design.md).
+
+**Consequences:**
+
+- The UI stays Python-only and shares the existing FastAPI process and Caddy route; no
+  second service or port is added.
+- The dashboard gains a Bokeh/Panel runtime and a dependency upgrade. Panel resources
+  must be served locally, not from a CDN.
+- The Content Security Policy must be widened for Bokeh/Panel inline scripts, styles, and
+  websocket connections. The final directives are measured during the mount spike; an
+  `unsafe-eval` requirement would need separate sign-off.
+- The existing JSON state, atomic-write, backup, and authentication behavior is retained.
+  A process-wide lock is added because Panel callbacks may run on multiple threads.
+- Concurrent scene edits are last-write-wins.
+- Scene/figure interaction beyond the MVP (lazy chart loading, non-time-series figures,
+  per-scene grid settings, conflict detection) is deferred.
+- No database schema, role, or read-API write route changes.
+
+This ADR supersedes the UI stack and the personal/shared figure scoping in ADR-026. It
+retains ADR-026's JSON state and authentication boundaries and ADR-027's location-based
+figure selection.

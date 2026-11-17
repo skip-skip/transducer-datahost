@@ -198,6 +198,54 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - [ ] The dashboard container has no `POSTGRES_*` environment variables.
 - [ ] `state.json` backup and restore tested.
 
+## Phase 9 — Panel dashboard rework
+
+The Jinja2/HTMX/Plotly dashboard UI is replaced by a HoloViz Panel application mounted
+inside the existing FastAPI service ([ADR-028](decisions.md#adr-028-use-holoviz-panel-for-the-dashboard-frontend)).
+The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
+
+**Deliverables**
+
+- [ ] `panel>=1.5` dependency; the Panel app is mounted in FastAPI with
+  `panel.io.fastapi.add_applications`.
+- [ ] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
+  verification step are removed. The image stays Python-only.
+- [ ] State version 2: shared scenes, each a collection of gridded figures. A version 1
+  `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
+- [ ] Scene domain operations: create and delete scenes; per-user selected scene and tray
+  state.
+- [ ] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
+- [ ] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
+  Clicking an empty cell creates a minimum-size figure there.
+- [ ] Figure title ribbon: click selects and highlights the figure and opens the settings
+  tray; drag moves the figure. Layout persists across reloads and restarts.
+- [ ] Settings tray: title, location (including "All locations"), analyte, range
+  (24h/7d/30d), save, and confirmed delete.
+- [ ] Bokeh time-series charts for every figure in the selected scene, with loading and
+  inline error states.
+- [ ] Panel cookie validation against the existing signed session cookie, the minimum
+  Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
+- [ ] Tests for state v2, scene/figure operations, the Panel mount, callbacks, and the
+  chart builder.
+
+**Exit criteria**
+
+- [ ] Login with a read token works; an invalid or missing session shows the sign-in path.
+- [ ] Create and delete scenes; a container restart preserves the remaining scenes.
+- [ ] Clicking an empty cell creates a minimum-size figure; a full scene reports instead
+  of overlapping figures.
+- [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
+  and restart.
+- [ ] Figures cannot be saved with an invalid series or an incompatible location/series
+  pair.
+- [ ] Charts render for 24h/7d/30d within `DASHBOARD_MAX_POINTS`.
+- [ ] Two read tokens see the same scenes.
+- [ ] The dashboard container has no `POSTGRES_*` environment variables, and no database
+  schema, role, or read-API write route is added.
+- [ ] No external CDN requests; the page works under the final CSP.
+- [ ] `state.json` backup and restore tested, including the v1 archive.
+- [ ] Python tests, ruff, and mypy pass.
+
 ## Global acceptance criteria (v1)
 
 | Criterion | Target |

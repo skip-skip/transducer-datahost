@@ -1,5 +1,11 @@
 # Dashboard
 
+> **Superseded during Phase 9.** This page describes the v1 Jinja2/HTMX/Plotly UI.
+> The replacement Panel frontend is specified in
+> [dashboard-panel-design.md](dashboard-panel-design.md) and
+> [ADR-028](decisions.md#adr-028-use-holoviz-panel-for-the-dashboard-frontend).
+> This page will be rewritten when the Panel implementation lands.
+
 The dashboard is a separate service that reads the existing read-only API. It
 adds no database tables, no database role, and no write routes to the API.
 
