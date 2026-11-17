@@ -226,6 +226,46 @@ def test_ensure_archives_a_version_1_document(tmp_path) -> None:
     assert store.load() == default_state()
 
 
+def test_legacy_v2_document_is_archived_not_published(tmp_path) -> None:
+    legacy = {
+        "version": 2,
+        "shared": {
+            "scenes": [
+                {
+                    "id": "s1",
+                    "name": "Old scene",
+                    "position": 0,
+                    "grid": {"cols": 12, "row_height": 220},
+                    "figures": [],
+                }
+            ]
+        },
+        "personal": {"alice": {"scenes": []}},
+    }
+    write_document(tmp_path, legacy)
+    store = StateStore(tmp_path)
+
+    state = store.load()
+
+    assert state == default_state()
+    archive = tmp_path / "state.v2-legacy.json"
+    assert archive.exists()
+    assert json.loads(archive.read_text(encoding="utf-8")) == legacy
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == state
+    assert json.loads((tmp_path / "state.json.bak").read_text(encoding="utf-8")) == legacy
+
+
+def test_ensure_archives_a_legacy_v2_document(tmp_path) -> None:
+    legacy = {"version": 2, "shared": {"scenes": []}, "personal": {}}
+    write_document(tmp_path, legacy)
+    store = StateStore(tmp_path)
+
+    store.ensure()
+
+    assert (tmp_path / "state.v2-legacy.json").exists()
+    assert store.load() == default_state()
+
+
 def test_ensure_rejects_an_invalid_v2_document(tmp_path) -> None:
     write_document(tmp_path, make_document(make_scene(name="")))
     store = StateStore(tmp_path)

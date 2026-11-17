@@ -129,6 +129,12 @@ A version 1 state file (personal/shared figures) is archived to
 `state.v1.json` and replaced with an empty version 2 document on first load. It
 is never published into the shared scenes.
 
+An early version 2 draft stored top-level `shared` and `personal` keys instead
+of `scenes` and `ui`. Such a file is archived to `state.v2-legacy.json` and
+replaced with an empty version 2 document on first load, so a container that
+was left on the abandoned schema still starts. Any scenes in the archive can be
+recreated by hand; they are not imported automatically.
+
 Write safety:
 
 - A process-wide `threading.RLock` plus `filelock` around every read-modify-write.
@@ -269,18 +275,36 @@ Restore:
 safe. A restored version 1 file is archived and replaced as described in
 section 3.
 
+### State load failures
+
+`StateError: state has unknown keys: personal, shared` means the volume holds
+the abandoned intermediate version 2 document. The current release archives it
+to `state.v2-legacy.json` and starts with an empty dashboard. If the image is
+older than that fix, stop the dashboard and move the file aside first:
+
+```bash
+docker compose stop dashboard
+docker compose run --rm --entrypoint sh dashboard -c \
+  'cd /var/lib/transducer-dashboard && mv state.json state.json.v2legacy && mv state.json.bak state.json.bak.v2legacy'
+docker compose up -d dashboard
+```
+
+Any other `StateError` means the file is genuinely malformed. Inspect
+`state.json.bak` and restore it as above rather than deleting the volume.
+
 ## 8. Verification
 
 Automated coverage in `dashboard/tests`:
 
-- State v2 validation, round-trip, backup, v1 archive, concurrent mutations.
+- State v2 validation, round-trip, backup, v1 and legacy-v2 archive,
+  concurrent mutations.
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, Panel mount, self-hosted resources,
   and the absence of external CDN URLs.
 - Panel shell, grid, settings-tray callbacks, and chart builder/windowing.
 - Read-client and settings behavior.
 
-Latest local run: `159 passed`; `ruff check dashboard` and
+Latest local run: `161 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
 grid layout persistence, the empty-cell bridge, settings save/reload, and
 Bokeh chart rendering into a document.

@@ -8,6 +8,11 @@ atomically replaces ``state.json``.
 Version 1 documents (personal/shared figures) are archived to ``state.v1.json``
 and replaced with a fresh version 2 document. Version 1 personal figures are
 never published into the shared scenes of version 2.
+
+An intermediate version 2 draft used top-level ``shared``/``personal`` keys
+instead of ``scenes``/``ui``. Those documents are archived to
+``state.v2-legacy.json`` and replaced with a fresh version 2 document so a
+container left on the abandoned schema still starts.
 """
 
 from __future__ import annotations
@@ -26,6 +31,7 @@ STATE_VERSION = 2
 STATE_FILENAME = "state.json"
 BACKUP_FILENAME = "state.json.bak"
 ARCHIVE_V1_FILENAME = "state.v1.json"
+ARCHIVE_V2_LEGACY_FILENAME = "state.v2-legacy.json"
 LOCK_FILENAME = ".state.lock"
 
 # Grid configuration for the MVP. Per-scene grids are a follow-up.
@@ -190,6 +196,20 @@ def validate_ui(entry: Any, where: str = "ui") -> None:
         raise StateError(f"{where}.scenes_tray_collapsed must be a boolean")
 
 
+def _is_legacy_v2(data: Mapping[Any, Any]) -> bool:
+    """Return True for the abandoned v2 draft with shared/personal scopes."""
+
+    version = data.get("version")
+    return (
+        isinstance(version, int)
+        and not isinstance(version, bool)
+        and version == STATE_VERSION
+        and ("shared" in data or "personal" in data)
+        and "scenes" not in data
+        and "ui" not in data
+    )
+
+
 def validate_state(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise StateError("state must be a JSON object")
@@ -235,6 +255,7 @@ class StateStore:
         self.path = self.directory / STATE_FILENAME
         self.backup_path = self.directory / BACKUP_FILENAME
         self.archive_v1_path = self.directory / ARCHIVE_V1_FILENAME
+        self.archive_v2_legacy_path = self.directory / ARCHIVE_V2_LEGACY_FILENAME
         self.lock_path = self.directory / LOCK_FILENAME
         self._lock = FileLock(str(self.lock_path))
         self._mutex = threading.RLock()
@@ -271,7 +292,12 @@ class StateStore:
         data = self._read_unlocked()
         version = data.get("version")
         if isinstance(version, int) and not isinstance(version, bool) and version == 1:
-            self._archive_v1_unlocked()
+            self._archive_unlocked(self.archive_v1_path, "version 1")
+            fresh = default_state()
+            self._write_unlocked(fresh)
+            return fresh
+        if _is_legacy_v2(data):
+            self._archive_unlocked(self.archive_v2_legacy_path, "legacy version 2")
             fresh = default_state()
             self._write_unlocked(fresh)
             return fresh
@@ -290,11 +316,11 @@ class StateStore:
             raise StateError("state must be a JSON object")
         return data
 
-    def _archive_v1_unlocked(self) -> None:
+    def _archive_unlocked(self, destination: Path, label: str) -> None:
         try:
-            shutil.copy2(self.path, self.archive_v1_path)
+            shutil.copy2(self.path, destination)
         except OSError as exc:
-            raise StateError(f"cannot archive version 1 state: {exc}") from exc
+            raise StateError(f"cannot archive {label} state: {exc}") from exc
 
     def _write_unlocked(self, data: dict[str, Any]) -> None:
         validate_state(data)
