@@ -333,4 +333,7 @@ networks:
   # ports for a container attached exclusively to internal networks
   # (moby/moby #44986), so the published 8443 lives on this side. No other
   # service joins it.
-  edge: {}
+  edge:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
