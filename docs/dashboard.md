@@ -1,13 +1,11 @@
 # Dashboard
 
-> **Superseded during Phase 9.** This page describes the v1 Jinja2/HTMX/Plotly UI.
-> The replacement Panel frontend is specified in
-> [dashboard-panel-design.md](dashboard-panel-design.md) and
-> [ADR-028](decisions.md#adr-028-use-holoviz-panel-for-the-dashboard-frontend).
-> This page will be rewritten when the Panel implementation lands.
-
 The dashboard is a separate service that reads the existing read-only API. It
-adds no database tables, no database role, and no write routes to the API.
+adds no database tables, no database role, and no write routes to the API. The
+UI is a HoloViz Panel application mounted inside the FastAPI process
+([ADR-028](decisions.md#adr-028-use-holoviz-panel-for-the-dashboard-frontend));
+the interaction and state design is in
+[dashboard-panel-design.md](dashboard-panel-design.md).
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
@@ -20,17 +18,20 @@ Browser
 Caddy (existing TLS front door)
   |  reverse_proxy dashboard:8080 (prefix stripped)
   v
-dashboard service (FastAPI + Jinja2 + HTMX + Plotly)
-  |                         |
-  | httpx + user's token    | JSON read/write
-  v                         v
-read-api:8080          /var/lib/transducer-dashboard/state.json
-(read role, existing)  (dashboard_state Docker volume)
+dashboard service (one uvicorn worker)
+  |-- FastAPI: login, logout, health, security headers
+  |-- Panel app mounted at /
+  |
+  | httpx + user's token          | JSON state
+  v                               v
+read-api:8080                 /var/lib/transducer-dashboard/state.json
+(read role, existing)         (dashboard_state volume)
 ```
 
-The dashboard container has no `POSTGRES_*` environment variables. Every data
-request carries the browser user's read API token. The read API remains the only
-component with database credentials.
+Panel and Bokeh assets are served locally by the dashboard process. There is no
+Node build and no external CDN request. The dashboard container has no
+`POSTGRES_*` environment variables; every data request carries the browser
+user's read API token.
 
 ## 2. Authentication
 
@@ -38,9 +39,12 @@ The read API keys are the only credential.
 
 1. `GET /dashboard/login` shows a token form.
 2. `POST /dashboard/login` calls `GET /api/whoami` with the submitted token.
-3. On `200`, the service stores `{label, token}` in a signed session cookie.
-4. Every page and partial uses that token for read API calls.
-5. A `401` from the read API clears the session and redirects to login.
+3. On `200`, the service stores `{label, token}` in a signed session cookie and
+   redirects to the Panel application.
+4. The Panel application reads the same cookie from `pn.state.cookies` and
+   forwards the token on every read API call.
+5. A missing or badly signed cookie shows the sign-in view instead of the
+   workspace.
 
 Cookie properties:
 
@@ -48,10 +52,22 @@ Cookie properties:
 - Signed with `DASHBOARD_SECRET_KEY`; changing the key invalidates all sessions.
 - Lifetime from `DASHBOARD_SESSION_MAX_AGE` (default 8 hours).
 - Path is the app root (`/dashboard` in production).
-- The token and `Authorization` header are never logged.
+- The token and `Authorization` header are never logged or rendered.
 
-The service also sends `X-Frame-Options: DENY`, `X-Content-Type-Options:
-nosniff`, `Referrer-Policy: same-origin`, and a self-only Content-Security-Policy.
+If a read token is revoked at the read API, panel requests fail and the affected
+chart or settings action shows an inline error; sign out and sign in again with
+a valid token. The session cookie itself is not revalidated on every request.
+
+The service sends `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
+`Referrer-Policy: same-origin`, and a self-only Content-Security-Policy:
+
+```text
+default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
+img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:;
+worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+```
+
+No `unsafe-eval` is required.
 
 ## 3. State
 
@@ -60,31 +76,32 @@ in PostgreSQL.
 
 ```json
 {
-  "version": 1,
-  "shared": {
-    "figures": [
-      {
-        "id": "5f0c8e...",
-        "name": "GC-1980 water level",
-        "series_id": 42,
-        "location_id": 7,
-        "position": 0,
-        "config": {},
-        "created_by": "analyst-1",
-        "created_at": "2026-11-11T13:00:00Z",
-        "updated_at": "2026-11-11T13:00:00Z"
-      }
-    ]
-  },
-  "personal": {
+  "version": 2,
+  "scenes": [
+    {
+      "id": "6b1e0c...",
+      "name": "Water levels",
+      "figures": [
+        {
+          "id": "5f0c8e...",
+          "title": "GC-1980 water level",
+          "location_id": 7,
+          "series_id": 42,
+          "range": "7d",
+          "layout": {"x": 0, "y": 0, "w": 3, "h": 2},
+          "created_at": "2026-11-11T13:00:00Z",
+          "updated_at": "2026-11-11T13:00:00Z"
+        }
+      ],
+      "created_at": "2026-11-11T13:00:00Z",
+      "updated_at": "2026-11-11T13:00:00Z"
+    }
+  ],
+  "ui": {
     "analyst-1": {
-      "figures": [],
-      "ui": {
-        "view": "personal",
-        "personal": { "selected_figure_id": null, "folders_collapsed": false },
-        "shared":   { "selected_figure_id": null, "folders_collapsed": false },
-        "tz": "local"
-      }
+      "selected_scene_id": "6b1e0c...",
+      "selected_figure_id": "5f0c8e...",
+      "scenes_tray_collapsed": false
     }
   }
 }
@@ -92,53 +109,77 @@ in PostgreSQL.
 
 Rules:
 
-- A figure binds to a `series_id` and, since location-based selection, an
-  optional `location_id`. Location and analyte are UI selectors that resolve
-  to one series at one location, so multi-channel loggers, unit changes, and
-  loggers that moved between wells stay unambiguous.
-- `location_id` is null for figures saved before location scoping and for
-  deliberately un-scoped ones: they chart the whole series across every
-  location, and the location selector shows "All locations" until re-saved.
-- Personal figures are visible only to the matching token label.
-- Shared figures are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
-  optionally restricts who may edit them; empty means any valid read key.
-- Selected figure and pane collapse are stored per user and per view.
-- Figure IDs are UUIDs because there is no database identity column.
+- Scenes are shared between every valid read token; there are no personal
+  scenes and no editor allowlist in the MVP.
+- A figure binds to a `series_id` and an optional `location_id`. Location and
+  analyte are UI selectors that resolve to one series at one location, so
+  multi-channel loggers, unit changes, and loggers that moved between wells stay
+  unambiguous.
+- `location_id` is null for an un-scoped figure: it charts the whole series
+  across every location, and the location selector shows "All locations".
+- `series_id` is null until a figure is configured; such a figure shows a
+  prompt instead of a chart.
+- `range` is one of `24h`, `7d`, `30d`. New figures start at the range implied
+  by `DASHBOARD_DEFAULT_WINDOW_DAYS`.
+- The selected scene, selected figure, and scene-tray collapse state are stored
+  per token label under `ui`.
+- Figure and scene IDs are UUIDs because there is no database identity column.
+
+A version 1 state file (personal/shared figures) is archived to
+`state.v1.json` and replaced with an empty version 2 document on first load. It
+is never published into the shared scenes.
 
 Write safety:
 
-- `filelock` around every read-modify-write.
-- Write to `state.json.tmp`, `fsync`, copy the current file to `state.json.bak`,
+- A process-wide `threading.RLock` plus `filelock` around every read-modify-write.
+- Write to a temporary file, `fsync`, copy the current file to `state.json.bak`,
   then `os.replace` the temporary file into place.
 - Validate the document on load and before every write. A corrupt file stops the
   service with a clear error instead of silently discarding state.
-- One uvicorn worker.
+- One uvicorn worker; concurrent edits are last-write-wins.
 - Directory mode `0700`, file mode `0600`.
 
 ## 4. UI
 
-Left pane:
+Scene tray (left, collapsible):
 
-- Collapsible, single-level folder list. Each row is one figure.
-- `My figures` and `Shared` tabs.
-- `+ New figure` creates a draft in the active tab.
-- The active figure is highlighted; the pane collapse and selection are saved.
+- Lists every shared scene; the selected scene is highlighted.
+- `+ New scene` creates and selects a scene.
+- `Delete scene` takes two clicks (delete, then confirm) and removes its
+  figures.
 
-Main view:
+Scene canvas (center):
 
-- `Name`: used in the folder list.
-- `Location`: well from `GET /api/locations`; the value is `location_id`, and
-  the empty choice means "all locations".
-- `Analyte`: series from `GET /api/locations/{id}/series`; the value is
-  `series_id`. Option labels carry the logger serial because a location can
-  host more than one instrument over time.
-- Range buttons: `24h`, `7d`, `30d`; charts use server-side bucketing.
-- `Save` and `Delete`.
+- A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
+- Clicking an empty cell creates a minimum-size figure at that cell. If the cell
+  cannot fit one, the first free slot is used; a full scene reports instead of
+  overlapping figures.
+- Each figure has a title ribbon and a chart. Click the ribbon to select and
+  highlight the figure; drag the ribbon to move it; drag the lower-right corner
+  to resize. Layouts persist immediately and survive reloads and restarts.
 
-A new figure starts as a draft with a default name and no series. Saving
-rejects a series that does not exist and a location/series pair with no
-readings together, so a figure cannot silently render an empty chart. A
-location with no series reports it in the analyte selector.
+Settings tray (right):
+
+- `Title`, `Location` (including "All locations"), `Analyte`, and a
+  `24h`/`7d`/`30d` range.
+- Locations come from `GET /locations`; analytes come from
+  `GET /locations/{id}/series`, or `GET /series` for an un-scoped figure. Option
+  labels include the logger serial because a location can host more than one
+  instrument over time.
+- `Save` rejects a blank title, a missing analyte, a series that does not exist,
+  and a location/series pair with no readings together.
+- `Delete figure` takes two clicks (delete, then confirm).
+
+Charts:
+
+- Bokeh line charts for every configured figure in the selected scene, loaded
+  when the scene opens. Cards show a loading placeholder while the requests run.
+- Data comes from `GET /series/{id}/points` with the figure's optional
+  `location_id`, the site time zone, and `DASHBOARD_MAX_POINTS`. Hover shows the
+  site-local timestamp and value.
+- An unconfigured figure asks for a location and analyte; an empty range says no
+  data is available; a read API failure shows an inline error without breaking
+  the rest of the scene.
 
 ## 5. Read API additions
 
@@ -168,12 +209,11 @@ new table grants and an un-scoped request keeps returning the whole series.
 | `DASHBOARD_SECRET_KEY` | required | Signs the session cookie; at least 16 characters |
 | `DASHBOARD_STATE_DIR` | `/var/lib/transducer-dashboard` | State directory |
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
-| `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
-| `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
-| `DASHBOARD_SHARED_EDITORS` | empty | Labels allowed to edit shared figures |
+| `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Range for new figures (`<=1` gives `24h`, `<=7` gives `7d`, otherwise `30d`) |
+| `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap per figure |
 | `DASHBOARD_COOKIE_SECURE` | `true` | `false` only for local HTTP development |
 | `DASHBOARD_REQUEST_TIMEOUT` | `15` | Read API timeout (seconds) |
-| `SITE_TIMEZONE` | `America/New_York` | Range calculation time zone |
+| `SITE_TIMEZONE` | `America/New_York` | Range calculation and hover time zone |
 
 ## 7. Operations
 
@@ -198,9 +238,9 @@ by a `redir` in `caddy/Caddyfile`.
 ### TLS termination
 
 Caddy terminates TLS and proxies to the dashboard over plain HTTP. Without
-further configuration uvicorn would see `scheme=http`, and the absolute URLs
-the app generates (form actions, static assets, redirects) would be `http://`
-— browsers block those as mixed content, so styles and scripts do not load and
+further configuration uvicorn would see `scheme=http`, and the absolute URLs the
+app generates (redirects, static assets, Panel websocket) would be `http://` —
+browsers block those as mixed content, so styles and scripts do not load and
 the login form cannot submit. The dashboard therefore runs uvicorn with
 `--proxy-headers --forwarded-allow-ips "*"`, so Caddy's
 `X-Forwarded-Proto: https` sets the scheme and every generated URL is
@@ -226,24 +266,38 @@ Restore:
 4. `docker compose start dashboard`.
 
 `state.json.bak` holds the previous version. Atomic replace makes a live `cat`
-safe.
+safe. A restored version 1 file is archived and replaced as described in
+section 3.
 
 ## 8. Verification
 
+Automated coverage in `dashboard/tests`:
+
+- State v2 validation, round-trip, backup, v1 archive, concurrent mutations.
+- Scene and figure operations, layout bounds, minimum size, selection cleanup.
+- FastAPI auth, health, security headers, Panel mount, self-hosted resources,
+  and the absence of external CDN URLs.
+- Panel shell, grid, settings-tray callbacks, and chart builder/windowing.
+- Read-client and settings behavior.
+
+Latest local run: `159 passed`; `ruff check dashboard` and
+`mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
+grid layout persistence, the empty-cell bridge, settings save/reload, and
+Bokeh chart rendering into a document.
+
+Manual browser checklist:
+
 1. Log in with a valid read token; an invalid token is rejected.
-2. Create a personal figure, a shared figure, rename, change location/analyte,
-   change range, and delete. Pick a well whose logger also served another
-   location and confirm the chart excludes the other deployments.
-3. Restart the dashboard container; figures and selected state survive.
-4. Log in with a second token: shared figures are visible, the first user's
-   personal figures are not.
-5. `docker compose exec dashboard env` shows no `POSTGRES_*` variables.
-6. Rotate a read token; the old session returns to login on the next API call.
-7. Confirm a 30-day high-frequency chart returns at most `DASHBOARD_MAX_POINTS`
-   points.
-8. Test backup and restore of the volume.
-9. Behind the TLS front door, the login page's form action and asset URLs are
-   `https://`; the browser reports no mixed content.
+2. Create and delete scenes; a container restart preserves the remaining scenes.
+3. Click an empty cell; a minimum-size figure appears there.
+4. Click a ribbon; the figure highlights and the settings tray opens.
+5. Drag and resize a figure; the layout survives a reload and a restart.
+6. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
+7. Delete a figure; the scene updates and the selection clears.
+8. Log in with a second token; the same scenes are visible.
+9. Confirm no `POSTGRES_*` variables in the dashboard container.
+10. Confirm no external network requests in the browser network log.
+11. Test backup and restore of the volume.
 
 ## 9. Boundaries
 
@@ -252,4 +306,5 @@ safe.
 - No dashboard state in PostgreSQL.
 - No write routes on the read API.
 - No new user/password system; read API keys remain the credential.
-- Folders are single-level.
+- No personal scenes or editor allowlist in the MVP; scenes are shared.
+- One uvicorn worker; concurrent layout edits are last-write-wins.

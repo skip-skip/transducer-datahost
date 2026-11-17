@@ -231,21 +231,26 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 
 **Exit criteria**
 
-- [ ] Login with a read token works; an invalid or missing session shows the sign-in path.
-- [ ] Create and delete scenes; a container restart preserves the remaining scenes.
-- [ ] Clicking an empty cell creates a minimum-size figure; a full scene reports instead
+- [x] Login with a read token works; an invalid or missing session shows the sign-in path.
+- [x] Create and delete scenes; a container restart preserves the remaining scenes.
+- [x] Clicking an empty cell creates a minimum-size figure; a full scene reports instead
   of overlapping figures.
 - [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
-  and restart.
-- [ ] Figures cannot be saved with an invalid series or an incompatible location/series
+  and restart. (Selection and layout persistence are automated; dragging needs the
+  browser checklist.)
+- [x] Figures cannot be saved with an invalid series or an incompatible location/series
   pair.
-- [ ] Charts render for 24h/7d/30d within `DASHBOARD_MAX_POINTS`.
-- [ ] Two read tokens see the same scenes.
-- [ ] The dashboard container has no `POSTGRES_*` environment variables, and no database
+- [x] Charts render for 24h/7d/30d within `DASHBOARD_MAX_POINTS`.
+- [x] Two read tokens see the same scenes.
+- [x] The dashboard container has no `POSTGRES_*` environment variables, and no database
   schema, role, or read-API write route is added.
-- [ ] No external CDN requests; the page works under the final CSP.
-- [ ] `state.json` backup and restore tested, including the v1 archive.
-- [ ] Python tests, ruff, and mypy pass.
+- [ ] No external CDN requests; the page works under the final CSP. (Asset URLs and the
+  CSP header are automated; in-browser loading needs the browser checklist.)
+- [x] `state.json` backup and restore tested, including the v1 archive.
+- [x] Python tests, ruff, and mypy pass.
+
+The two unchecked items are the manual browser checks in
+[dashboard.md](dashboard.md#8-verification).
 
 ## Global acceptance criteria (v1)
 
