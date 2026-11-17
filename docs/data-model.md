@@ -271,14 +271,12 @@ The dashboard deliberately adds no tables and no database role. Its layout state
 single JSON document on the `dashboard_state` Docker volume, owned by the dashboard
 service:
 
-- `personal[<read-token label>].scenes`: private scenes (flat containers of figures).
-- `shared.scenes`: scenes visible to every valid read token.
-- `personal[<read-token label>].ui`: selected scene/figure, pane collapse, and active view.
-- Each scene has grid settings and figures with a per-figure grid layout. Version 1 documents
-  (`personal[...].figures` / `shared.figures`) migrate on load into a default scene per scope.
+- `personal[<read-token label>].figures`: private figures.
+- `shared.figures`: figures visible to every valid read token.
+- `personal[<read-token label>].ui`: selected figure, pane collapse, and active view.
 
-A figure stores `id`, `name`, `series_id`, optional `location_id`, a grid `layout`
-(`x`, `y`, `w`, `h`), `config`, `created_by`, `created_at`, and `updated_at`. It binds to
+A figure stores `id`, `name`, `series_id`, optional `location_id`, `position`,
+`config`, `created_by`, `created_at`, and `updated_at`. It binds to
 `transducer.series.series_id` and `transducer.location.location_id` by value only;
 there is no foreign key because the dashboard has no database connection. The UI derives
 Location and Analyte labels from `/api/locations` and `/api/locations/{id}/series`.

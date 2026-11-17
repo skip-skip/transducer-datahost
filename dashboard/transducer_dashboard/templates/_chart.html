@@ -1,6 +1,6 @@
 {% if error %}<p class="error">{{ error }}</p>{% endif %}
 {% if chart %}
-<div class="chart" data-chart{% if figure %} data-figure-id="{{ figure.id }}"{% endif %}>
+<div class="chart" data-chart>
   <script type="application/json" class="chart-data">{{ chart | tojson }}</script>
   <div class="plot"></div>
 </div>

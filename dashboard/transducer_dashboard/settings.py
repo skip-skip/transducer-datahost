@@ -8,7 +8,6 @@ from pathlib import Path
 
 DEFAULT_SITE_TIMEZONE = "America/New_York"
 DEFAULT_STATE_DIR = "/var/lib/transducer-dashboard"
-DEFAULT_MAX_FIGURES_PER_SCENE = 50
 MIN_SECRET_LENGTH = 16
 
 
@@ -46,7 +45,6 @@ class DashboardSettings:
     session_max_age: int = 28_800
     default_window_days: int = 7
     max_points: int = 2_000
-    max_figures_per_scene: int = DEFAULT_MAX_FIGURES_PER_SCENE
     shared_editors: frozenset[str] = frozenset()
     site_timezone: str = DEFAULT_SITE_TIMEZONE
     cookie_secure: bool = True
@@ -75,18 +73,8 @@ class DashboardSettings:
             session_max_age=_env_int("DASHBOARD_SESSION_MAX_AGE", 28_800),
             default_window_days=_env_int("DASHBOARD_DEFAULT_WINDOW_DAYS", 7),
             max_points=_env_int("DASHBOARD_MAX_POINTS", 2_000),
-            max_figures_per_scene=_max_figures_per_scene(),
             shared_editors=_env_list("DASHBOARD_SHARED_EDITORS"),
             site_timezone=os.environ.get("SITE_TIMEZONE", DEFAULT_SITE_TIMEZONE),
             cookie_secure=_env_bool("DASHBOARD_COOKIE_SECURE", True),
             request_timeout=float(os.environ.get("DASHBOARD_REQUEST_TIMEOUT", "15")),
         )
-
-
-def _max_figures_per_scene() -> int:
-    value = _env_int(
-        "DASHBOARD_MAX_FIGURES_PER_SCENE", DEFAULT_MAX_FIGURES_PER_SCENE
-    )
-    if value < 1:
-        raise SettingsError("DASHBOARD_MAX_FIGURES_PER_SCENE must be positive")
-    return value

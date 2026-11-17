@@ -7,30 +7,15 @@ forwards that token on every data request.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
-> **Scenes redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
-> context-sensitive options pane have shipped (no DB/read-API boundary changes). GridStack.js 14.1.1 is vendored under
-> `static/vendor/` with its MIT license; layout changes autosave in debounced batches. See
-> [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current implementation.
-
 ## State
 
 Layout state is a single JSON file on the Compose volume `dashboard_state`,
-mounted at `/var/lib/transducer-dashboard/state.json`. It is **version 2** and
-contains:
+mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
 
-- `shared.scenes` / `personal[<token label>].scenes`: scenes (flat containers
-  of figures) with grid settings and a per-figure layout.
-- `personal[<token label>].ui`: selected scene/figure, pane collapse, and view
+- `personal[<token label>].figures`: private figures for each read key.
+- `shared.figures`: figures visible to every read key.
+- `personal[<token label>].ui`: selected figure, folder-pane collapse, and view
   for each user, separately for personal and shared.
-
-The dashboard now renders the selected scene's figures as panels in a CSS grid
-using each figure's stored `layout`. The left pane lists scenes, and a nested
-options pane edits the selected scene or figure. Panels drag by their grip,
-resize, and snap to grid cells using the vendored GridStack.js library; layout
-changes autosave after a short debounce as one batch per scene. Version 1
-documents are migrated on first load into a default scene per scope/owner,
-validated, and written through the normal atomic path (`state.json.bak` keeps the
-old file).
 
 Writes take a file lock, fsync a temporary file, copy the previous version to
 `state.json.bak`, and atomically replace `state.json`. The container runs one
@@ -52,8 +37,7 @@ locations") chart the whole series.
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
 | `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
-| `DASHBOARD_MAX_FIGURES_PER_SCENE` | `50` | Maximum figures in one scene |
-| `DASHBOARD_SHARED_EDITORS` | empty | Comma-separated labels allowed to edit shared scenes/figures; empty means any valid read key |
+| `DASHBOARD_SHARED_EDITORS` | empty | Comma-separated labels allowed to edit shared figures; empty means any valid read key |
 | `DASHBOARD_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local development |
 | `SITE_TIMEZONE` | `America/New_York` | Range calculation time zone |
 
@@ -68,8 +52,7 @@ docker compose exec dashboard cat /var/lib/transducer-dashboard/state.json \
 
 Restore by stopping the dashboard, replacing `state.json`, keeping ownership for
 the container user (uid 10001), and starting it again. `state.json.bak` holds the
-previous version. Restoring a version 1 file is supported: it migrates to
-version 2 on first load and the pre-migration file is copied to `state.json.bak`.
+previous version.
 
 ## Development
 

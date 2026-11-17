@@ -1,67 +1,41 @@
 {% extends "base.html" %}
-{% block title %}{{ scene.name if scene else "Dashboard" }} · Transducer dashboard{% endblock %}
+{% block title %}{{ figure.name if figure else "Dashboard" }} · Transducer dashboard{% endblock %}
 {% block body %}
-<div class="app{% if ui[scope].folders_collapsed %} scenes-collapsed{% endif %}{% if ui[scope].options_collapsed %} options-collapsed{% endif %}">
-  <aside class="scenes-pane">
-    <div class="pane-header">
-      <strong>Scenes</strong>
+<div class="app{% if ui[scope].folders_collapsed %} sidebar-collapsed{% endif %}">
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <strong>Figures</strong>
       <form method="post" action="{{ url_for('toggle_folders') }}">
         <input type="hidden" name="scope" value="{{ scope }}">
-        <button class="icon" type="submit" title="Collapse scenes" aria-label="Collapse scenes">&laquo;</button>
+        <button class="icon" type="submit" title="Collapse folders" aria-label="Collapse folders">&laquo;</button>
       </form>
     </div>
-    {% include "_scene_list.html" %}
-    <div class="pane-footer">
+    {% include "_folder_list.html" %}
+    <div class="sidebar-footer">
       <span class="who">{{ session.label }}</span>
       <form method="post" action="{{ url_for('logout') }}">
         <button class="link" type="submit">Sign out</button>
       </form>
     </div>
   </aside>
-
-  <aside class="options-pane" id="options-pane">
-    <div class="pane-header">
-      <strong>Options</strong>
-      <form method="post" action="{{ url_for('toggle_options') }}">
-        <input type="hidden" name="scope" value="{{ scope }}">
-        <button class="icon" type="submit" title="Collapse options" aria-label="Collapse options">&laquo;</button>
-      </form>
-    </div>
+  <main class="main">
+    {% if ui[scope].folders_collapsed %}
+    <form method="post" action="{{ url_for('toggle_folders') }}" class="expand-form">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <button class="icon" type="submit" title="Show folders" aria-label="Show folders">&raquo;</button>
+    </form>
+    {% endif %}
     {% if error %}<p class="error">{{ error }}</p>{% endif %}
     {% if figure %}
-      {% include "_figure_options.html" %}
-    {% elif scene %}
-      {% include "_scene_options.html" %}
-    {% else %}
-      <p class="hint">Select or create a scene to see its options.</p>
-    {% endif %}
-  </aside>
-
-  <main class="workspace">
-    {% if ui[scope].folders_collapsed %}
-    <form method="post" action="{{ url_for('toggle_folders') }}" class="expand-form expand-scenes">
-      <input type="hidden" name="scope" value="{{ scope }}">
-      <button class="icon" type="submit" title="Show scenes" aria-label="Show scenes">&raquo;</button>
-    </form>
-    {% endif %}
-    {% if ui[scope].options_collapsed %}
-    <form method="post" action="{{ url_for('toggle_options') }}" class="expand-form expand-options">
-      <input type="hidden" name="scope" value="{{ scope }}">
-      <button class="icon" type="submit" title="Show options" aria-label="Show options">&laquo; Options</button>
-    </form>
-    {% endif %}
-    {% if scene %}
-      {% include "_scene_grid.html" %}
+      {% include "_figure_form.html" %}
     {% else %}
     <section class="empty">
-      <h1>No scene selected</h1>
-      <p>Create a scene to arrange figures on a grid.</p>
-      {% if can_edit %}
-      <form method="post" action="{{ url_for('create_scene') }}">
+      <h1>No figure selected</h1>
+      <p>Create a figure to chart a location and analyte.</p>
+      <form method="post" action="{{ url_for('create_figure') }}">
         <input type="hidden" name="scope" value="{{ scope }}">
-        <button type="submit">Create a scene</button>
+        <button type="submit">Create a figure</button>
       </form>
-      {% endif %}
     </section>
     {% endif %}
   </main>

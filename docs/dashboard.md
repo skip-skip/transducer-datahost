@@ -5,12 +5,6 @@ adds no database tables, no database role, and no write routes to the API.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
-> **Scenes redesign:** this document describes the current dashboard. Its state is `state.json` `version: 2`, which
-> stores scenes (flat containers of figures) with per-figure grid layouts. The scene list, nested options pane, grid
-> workspace with drag/resize/snap, and batched layout persistence have shipped. Preparation, target state shape,
-> migration, and techstack details are in [dashboard-scenes.md](dashboard-scenes.md). Boundaries remain the same (no DB
-> schema/roles, no dashboard state in PostgreSQL, no read-API writes, read-API-token auth).
-
 ## 1. Topology
 
 ```text
@@ -56,35 +50,20 @@ nosniff`, `Referrer-Policy: same-origin`, and a self-only Content-Security-Polic
 ## 3. State
 
 State is one JSON file on the `dashboard_state` volume. It is deliberately not
-in PostgreSQL. Version 2 organizes figures into **scenes**: flat containers with
-grid settings and a layout for each figure. The UI lists scenes, edits the
-selected scene or figure in the options pane, and renders the selected scene's
-figures as panels in a grid workspace. Dragging or resizing a panel updates its
-stored layout through a debounced batched save.
+in PostgreSQL.
 
 ```json
 {
-  "version": 2,
+  "version": 1,
   "shared": {
-    "scenes": [
+    "figures": [
       {
-        "id": "0f3c9a...",
-        "name": "Default scene",
+        "id": "5f0c8e...",
+        "name": "GC-1980 water level",
+        "series_id": 42,
+        "location_id": 7,
         "position": 0,
-        "grid": { "cols": 12, "row_height": 220 },
-        "figures": [
-          {
-            "id": "5f0c8e...",
-            "name": "GC-1980 water level",
-            "series_id": 42,
-            "location_id": 7,
-            "config": {},
-            "layout": { "x": 0, "y": 0, "w": 6, "h": 2 },
-            "created_by": "analyst-1",
-            "created_at": "2026-11-11T13:00:00Z",
-            "updated_at": "2026-11-11T13:00:00Z"
-          }
-        ],
+        "config": {},
         "created_by": "analyst-1",
         "created_at": "2026-11-11T13:00:00Z",
         "updated_at": "2026-11-11T13:00:00Z"
@@ -93,21 +72,11 @@ stored layout through a debounced batched save.
   },
   "personal": {
     "analyst-1": {
-      "scenes": [],
+      "figures": [],
       "ui": {
         "view": "personal",
-        "personal": {
-          "selected_scene_id": null,
-          "selected_figure_id": null,
-          "folders_collapsed": false,
-          "options_collapsed": false
-        },
-        "shared": {
-          "selected_scene_id": null,
-          "selected_figure_id": null,
-          "folders_collapsed": false,
-          "options_collapsed": false
-        },
+        "personal": { "selected_figure_id": null, "folders_collapsed": false },
+        "shared":   { "selected_figure_id": null, "folders_collapsed": false },
         "tz": "local"
       }
     }
@@ -117,10 +86,6 @@ stored layout through a debounced batched save.
 
 Rules:
 
-- A **scene** is a flat container of figures (no nested scenes). It carries a
-  name, display position, grid settings (`cols`, `row_height`), and figures.
-- A **figure** belongs to exactly one scene and keeps a grid `layout`
-  (`x`, `y`, `w`, `h`) that must fit inside the scene's `cols`.
 - A figure binds to a `series_id` and, since location-based selection, an
   optional `location_id`. Location and analyte are UI selectors that resolve
   to one series at one location, so multi-channel loggers, unit changes, and
@@ -128,21 +93,11 @@ Rules:
 - `location_id` is null for figures saved before location scoping and for
   deliberately un-scoped ones: they chart the whole series across every
   location, and the location selector shows "All locations" until re-saved.
-- Personal scenes are visible only to the matching token label.
-- Shared scenes are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
+- Personal figures are visible only to the matching token label.
+- Shared figures are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
   optionally restricts who may edit them; empty means any valid read key.
-- Selected scene, selected figure, pane collapse, and view are stored per user.
-- Scene and figure IDs are UUIDs because there is no database identity column.
-
-Migration from version 1:
-
-- A version 1 document is migrated on first load: every scope/owner gets one
-  `Default scene` containing its previous figures, figures get sequential
-  non-overlapping layouts, and the old selected figure maps to the new selected
-  scene plus figure.
-- The migrated document is validated, written through the normal atomic path,
-  and the previous `state.json` is kept as `state.json.bak`. Subsequent loads
-  see version 2 and are unchanged.
+- Selected figure and pane collapse are stored per user and per view.
+- Figure IDs are UUIDs because there is no database identity column.
 
 Write safety:
 
@@ -156,51 +111,26 @@ Write safety:
 
 ## 4. UI
 
-The dashboard has three regions:
+Left pane:
 
-Scenes pane (left):
+- Collapsible, single-level folder list. Each row is one figure.
+- `My figures` and `Shared` tabs.
+- `+ New figure` creates a draft in the active tab.
+- The active figure is highlighted; the pane collapse and selection are saved.
 
-- Collapsible, scope tabs `My scenes` and `Shared`.
-- Each row is a scene with its figure count; the selected scene is highlighted.
-- `+ New scene` creates and selects a scene in the active scope.
-- Pane collapse and scene/figure selection are saved per user.
+Main view:
 
-Options pane (nested right of the scenes pane):
+- `Name`: used in the folder list.
+- `Location`: well from `GET /api/locations`; the value is `location_id`, and
+  the empty choice means "all locations".
+- `Analyte`: series from `GET /api/locations/{id}/series`; the value is
+  `series_id`. Option labels carry the logger serial because a location can
+  host more than one instrument over time.
+- Range buttons: `24h`, `7d`, `30d`; charts use server-side bucketing.
+- `Save` and `Delete`.
 
-- With a scene selected and no figure: scene name, grid columns, row height,
-  a `X of N figures` count, `+ Add figure`, and delete scene. At the
-  `DASHBOARD_MAX_FIGURES_PER_SCENE` cap the add button is replaced by a limit
-  hint.
-- With a figure selected: name, location, analyte, save, delete, and a read-only
-  layout summary.
-- `DASHBOARD_SHARED_EDITORS` rules apply; read-only shared views disable or hide
-  mutations.
-- Pane collapse is saved per user.
-
-Grid workspace (main):
-
-- Uses the scene's `cols` and `row_height` to place figures in their stored
-  `layout` cells.
-- Each figure is a panel with a drag grip, title/select control, range buttons,
-  and its own chart. Panels load charts independently through HTMX, so one
-  failing figure does not block the rest.
-- Panels drag by their grip, resize from the lower-right handle, and snap to grid
-  cells (GridStack.js 14.1.1, vendored under `static/vendor/` with its MIT
-  license). The grid compacts vertically.
-- Layout changes autosave after a 500 ms debounce as one batched request to
-  `POST /scenes/{scope}/{scene_id}/layout`; the status line above the grid reports
-  success or failure. Read-only shared views disable drag and resize.
-- Range buttons (`24h`, `7d`, `30d`) refresh only that panel; charts use
-  server-side bucketing.
-- Multiple Plotly charts render independently on one page.
-- The workspace scrolls horizontally on narrow screens instead of reflowing
-  panels, so stored grid positions stay meaningful.
-
-A scene holds at most `DASHBOARD_MAX_FIGURES_PER_SCENE` figures (default 50).
-The domain layer and the create route both enforce the cap, so a request that
-races the UI still cannot exceed it. A new figure starts with a default name, no
-series, and the next free grid slot.
-Saving rejects a series that does not exist and a location/series pair with no
+A new figure starts as a draft with a default name and no series. Saving
+rejects a series that does not exist and a location/series pair with no
 readings together, so a figure cannot silently render an empty chart. A
 location with no series reports it in the analyte selector.
 
@@ -234,7 +164,6 @@ new table grants and an un-scoped request keeps returning the whole series.
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
 | `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
-| `DASHBOARD_MAX_FIGURES_PER_SCENE` | `50` | Maximum figures in one scene (must be positive) |
 | `DASHBOARD_SHARED_EDITORS` | empty | Labels allowed to edit shared figures |
 | `DASHBOARD_COOKIE_SECURE` | `true` | `false` only for local HTTP development |
 | `DASHBOARD_REQUEST_TIMEOUT` | `15` | Read API timeout (seconds) |
@@ -296,16 +225,12 @@ safe.
 ## 8. Verification
 
 1. Log in with a valid read token; an invalid token is rejected.
-2. Create personal and shared scenes; rename/delete scenes, add figures, rename
-   figures, change location/analyte, change range, and delete figures. Pick a
-   well whose logger also served another location and confirm the chart excludes
-   the other deployments.
-3. Drag a panel by its grip and resize it from the lower-right handle; reload and
-   confirm the layout was saved. Restart the dashboard container; scenes,
-   figures, layouts, and selected state survive.
-4. Log in with a second token: shared scenes are visible, the first user's
-   personal scenes are not, and read-only shared scenes cannot be dragged or
-   resized.
+2. Create a personal figure, a shared figure, rename, change location/analyte,
+   change range, and delete. Pick a well whose logger also served another
+   location and confirm the chart excludes the other deployments.
+3. Restart the dashboard container; figures and selected state survive.
+4. Log in with a second token: shared figures are visible, the first user's
+   personal figures are not.
 5. `docker compose exec dashboard env` shows no `POSTGRES_*` variables.
 6. Rotate a read token; the old session returns to login on the next API call.
 7. Confirm a 30-day high-frequency chart returns at most `DASHBOARD_MAX_POINTS`
@@ -321,4 +246,4 @@ safe.
 - No dashboard state in PostgreSQL.
 - No write routes on the read API.
 - No new user/password system; read API keys remain the credential.
-- Scenes are flat containers of figures; scenes do not nest.
+- Folders are single-level.
