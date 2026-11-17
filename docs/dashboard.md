@@ -5,13 +5,11 @@ adds no database tables, no database role, and no write routes to the API.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
-> **Planned update (scenes redesign):** this document describes the **current** single-figure dashboard
-> UI. Its state is already `state.json` `version: 2`, which stores scenes (flat containers of figures) with
-> per-figure grid layouts; the UI still uses a per-scope default scene. A planned redesign introduces the
-> multi-figure grid workspace with snapping panels and a context-sensitive options pane. Implementation
-> preparation, target state shape, migration, and techstack changes are captured in
-> [dashboard-scenes.md](dashboard-scenes.md). Boundaries remain the same (no DB schema/roles, no dashboard
-> state in PostgreSQL, no read-API writes, read-API-token auth).
+> **Scenes redesign (in progress):** this document describes the current dashboard. Its state is `state.json`
+> `version: 2`, which stores scenes (flat containers of figures) with per-figure grid layouts. The scene list, nested
+> options pane, and CSS-grid workspace have shipped; drag/resize/snap and batched layout persistence remain. Preparation,
+> target state shape, migration, and techstack details are in [dashboard-scenes.md](dashboard-scenes.md). Boundaries
+> remain the same (no DB schema/roles, no dashboard state in PostgreSQL, no read-API writes, read-API-token auth).
 
 ## 1. Topology
 
@@ -59,9 +57,10 @@ nosniff`, `Referrer-Policy: same-origin`, and a self-only Content-Security-Polic
 
 State is one JSON file on the `dashboard_state` volume. It is deliberately not
 in PostgreSQL. Version 2 organizes figures into **scenes**: flat containers with
-grid settings and a layout for each figure. The current UI is still
-single-figure; it reads and writes a per-scope `Default scene` until the
-scene/grid workspace ships (Phase 9, [dashboard-scenes.md](dashboard-scenes.md)).
+grid settings and a layout for each figure. The UI lists scenes, edits the
+selected scene or figure in the options pane, and renders the selected scene's
+figures as panels in a grid workspace. Drag/resize/snap persistence is the
+remaining Phase 9 work ([dashboard-scenes.md](dashboard-scenes.md)).
 
 ```json
 {
@@ -157,26 +156,41 @@ Write safety:
 
 ## 4. UI
 
-Left pane:
+The dashboard has three regions:
 
-- Collapsible, single-level folder list. Each row is one figure.
-- `My figures` and `Shared` tabs.
-- `+ New figure` creates a draft in the active tab.
-- The active figure is highlighted; the pane collapse and selection are saved.
+Scenes pane (left):
 
-Main view:
+- Collapsible, scope tabs `My scenes` and `Shared`.
+- Each row is a scene with its figure count; the selected scene is highlighted.
+- `+ New scene` creates and selects a scene in the active scope.
+- Pane collapse and scene/figure selection are saved per user.
 
-- `Name`: used in the folder list.
-- `Location`: well from `GET /api/locations`; the value is `location_id`, and
-  the empty choice means "all locations".
-- `Analyte`: series from `GET /api/locations/{id}/series`; the value is
-  `series_id`. Option labels carry the logger serial because a location can
-  host more than one instrument over time.
-- Range buttons: `24h`, `7d`, `30d`; charts use server-side bucketing.
-- `Save` and `Delete`.
+Options pane (nested right of the scenes pane):
 
-A new figure starts as a draft with a default name and no series. Saving
-rejects a series that does not exist and a location/series pair with no
+- With a scene selected and no figure: scene name, grid columns, row height,
+  `+ Add figure`, and delete scene.
+- With a figure selected: name, location, analyte, save, delete, and a read-only
+  layout summary.
+- `DASHBOARD_SHARED_EDITORS` rules apply; read-only shared views disable or hide
+  mutations.
+- Pane collapse is saved per user.
+
+Grid workspace (main):
+
+- Uses the scene's `cols` and `row_height` to place figures in their stored
+  `layout` cells.
+- Each figure is a panel with a title/select control, range buttons, and its own
+  chart. Panels load charts independently through HTMX, so one failing figure
+  does not block the rest.
+- Range buttons (`24h`, `7d`, `30d`) refresh only that panel; charts use
+  server-side bucketing.
+- Multiple Plotly charts render independently on one page.
+- Drag, resize, and snap-to-grid are **not implemented yet**; they are the next
+  Phase 9 slice. Layout currently comes from stored state and scene grid
+  settings.
+
+A new figure starts with a default name, no series, and the next free grid slot.
+Saving rejects a series that does not exist and a location/series pair with no
 readings together, so a figure cannot silently render an empty chart. A
 location with no series reports it in the analyte selector.
 
@@ -292,4 +306,4 @@ safe.
 - No dashboard state in PostgreSQL.
 - No write routes on the read API.
 - No new user/password system; read API keys remain the credential.
-- Folders are single-level.
+- Scenes are flat containers of figures; scenes do not nest.

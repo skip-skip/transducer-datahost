@@ -1,0 +1,13 @@
+<div class="scene-grid"
+     data-scene-id="{{ scene.id }}"
+     data-grid-cols="{{ scene.grid.cols }}"
+     data-row-height="{{ scene.grid.row_height }}"
+     style="grid-template-columns: repeat({{ scene.grid.cols }}, minmax(0, 1fr)); grid-auto-rows: {{ scene.grid.row_height }}px;">
+  {% for item in figures %}
+    {% set figure_item = item %}
+    {% include "_figure_panel.html" %}
+  {% endfor %}
+</div>
+{% if not figures %}
+<p class="hint scene-empty">This scene has no figures yet. Add one from the options pane.</p>
+{% endif %}

@@ -1,10 +1,11 @@
-# Dashboard scenes redesign (implementation prep)
+# Dashboard scenes redesign
 
-> **Status:** In progress. The state layer (version 2 scenes schema, validation, and v1 → v2 migration) has landed;
-> the scene/grid/options UI and scene-aware routes are still planned. This document prepares implementation and does
-> **not** describe shipped behavior.
-> The current dashboard UI (single-figure-per-view, state `version: 2` with figures inside a default scene) is
-> documented in [dashboard.md](dashboard.md). Implementers should keep this document updated as decisions are finalized.
+> **Status:** In progress. The state layer (version 2 scenes schema, validation, and v1 → v2 migration) and the
+> server-rendered scene shell (scene list, options pane, CSS-grid workspace, scene-aware routes) have landed. Drag,
+> resize, snap-to-grid, and batched layout persistence remain. This document records the implementation plan and current
+> progress.
+> Current shipped behavior is documented in [dashboard.md](dashboard.md). Implementers should keep this document
+> updated as decisions are finalized.
 
 ## 1. Goal
 
@@ -28,8 +29,10 @@ read-only API.
   Model: `shared.scenes[]` and `personal[label].scenes[]`; each scene has grid settings and figures with
   per-figure layout, plus per-scope UI selection/collapse. The version 1 layout
   (`shared.figures[]`, `personal[label].figures[]`) migrates to a default scene on load.
-- UI: left pane lists figures; main pane edits/charts exactly one selected figure at a time; chart rendered client-side
-  from a single Plotly payload (`app.js`). The scene/grid/options UI is not built yet.
+- UI: three regions. The left pane lists scenes; the nested options pane edits the selected scene or figure; the main
+  workspace renders every figure in the selected scene as a panel in a CSS grid using its stored `layout`. Charts load
+  per panel through HTMX and render as independent Plotly instances (`app.js`). Drag/resize/snap and batched layout saves
+  are not built yet.
 - Figure identity/binding: UUID id, `series_id`, optional `location_id` (ADR-027), per-figure config; permissions are
   personal-vs-shared with optional `DASHBOARD_SHARED_EDITORS`.
 
@@ -84,7 +87,8 @@ See [dashboard.md](dashboard.md), `dashboard/transducer_dashboard/{app,figures,s
 
 ## 5. State schema and migration
 
-> The version 2 state layer is implemented. Scene/grid UI and scene-aware routes are still planned.
+> The version 2 state layer and the scene-aware routes/shell are implemented. Grid interactions (drag/resize/snap) and
+> batched layout persistence are still planned.
 
 ### 5.1 Implemented v2 shape
 - **Scene:** `id` (UUID), `name`, `position`, `grid` (`cols`, `row_height`), `figures[]`,
@@ -175,18 +179,18 @@ Sketch of the current shape:
 
 ## 7. Backend and UI implementation slices (prep checklist)
 
-1. **State/domain:** `state.py` v2 schema + migration + validation; scene/figure/layout operations module (successor to
-   `figures.py` patterns), permission checks, ID generation.
-2. **Routes/app:** scene CRUD/select, figure CRUD within scene, figure/scene options partials, layout save endpoint,
-   chart/points partial(s) or JSON endpoints for multi-chart rendering; context-sensitive options resolution.
-3. **Templates:** `index.html` shell (scenes pane, grid, options pane), scene list partial, grid item/window template,
-   scene-options and figure-options partials; preserve accessible labels and HTMX targets where used.
-4. **Static assets:** vendor grid library + license notice; update `app.js` for multi-chart registry and grid callbacks;
-   extend `app.css` for 3-pane/grid/window styling and collapse states; keep assets served from `/static`.
+1. **State/domain (done):** `state.py` v2 schema + migration + validation; scene/figure/layout operations in
+   `figures.py`, permission checks, ID generation.
+2. **Routes/app (done):** scene CRUD/select, figure CRUD within scene, figure/scene options partials, chart partial,
+   context-sensitive options resolution. **Pending:** layout save endpoint and batched persistence.
+3. **Templates (done):** `index.html` shell (scenes pane, options pane, grid), scene list partial, figure panel
+   template, scene-options and figure-options partials; accessible labels and HTMX targets preserved.
+4. **Static assets (partial):** multi-chart registry, range toggle, and resize handling in `app.js`; three-pane/grid/
+   panel/collapse styling in `app.css`. **Pending:** vendor a grid library with license notice and wire drag/resize/snap.
 5. **Settings/config:** only add env vars if truly required (e.g. grid defaults/limits); prefer safe defaults to minimize
    deployment/config churn.
-6. **Verification:** unit tests (migration, operations, routes, permissions), manual browser checks (multi-chart,
-   snap/resize persistence, restart/restore), and performance sanity with representative scene sizes.
+6. **Verification (partial):** unit tests cover migration, operations, routes, and permissions. **Pending:** manual
+   browser checks (drag/resize/snap persistence, restart/restore) and performance sanity with representative scene sizes.
 
 ## 8. Security, permissions, and ops considerations
 

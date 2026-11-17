@@ -8,9 +8,9 @@ forwards that token on every data request.
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
 > **Planned redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
-> context-sensitive options pane are planned (no DB/read-API boundary changes). See
-> [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current
-> implementation.
+> context-sensitive options pane are in progress (no DB/read-API boundary changes). The scene list, options pane, and
+> grid rendering have landed; drag/resize/snap and batched layout saves remain. See
+> [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current implementation.
 
 ## State
 
@@ -23,8 +23,10 @@ contains:
 - `personal[<token label>].ui`: selected scene/figure, pane collapse, and view
   for each user, separately for personal and shared.
 
-The current UI is still single-figure and uses a per-scope `Default scene`;
-the scenes/grid workspace is the remaining Phase 9 work. Version 1 documents
+The dashboard now renders the selected scene's figures as panels in a CSS grid
+using each figure's stored `layout`. The left pane lists scenes, and a nested
+options pane edits the selected scene or figure. Drag, resize, snap-to-grid, and
+batched layout persistence are the remaining Phase 9 work. Version 1 documents
 are migrated on first load into a default scene per scope/owner, validated, and
 written through the normal atomic path (`state.json.bak` keeps the old file).
 

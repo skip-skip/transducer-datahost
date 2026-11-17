@@ -20,7 +20,13 @@ from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from . import figures as figure_ops
-from .figures import SCOPES, FigureError, FigureNotFound, FigurePermissionError
+from .figures import (
+    SCOPES,
+    FigureError,
+    FigureNotFound,
+    FigurePermissionError,
+    SceneNotFound,
+)
 from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings, SettingsError
 from .state import StateStore
@@ -62,6 +68,25 @@ def _names_from_locations(rows: list[dict[str, Any]]) -> dict[int, str]:
             name = row.get("name")
             names[raw] = name if isinstance(name, str) else ""
     return names
+
+
+def _parse_optional_int(raw: str, field: str) -> int | None:
+    try:
+        return int(raw) if raw.strip() else None
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"invalid {field}") from exc
+
+
+def _parse_positive_int(raw: str, field: str) -> int:
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail=f"{field} must be an integer"
+        ) from exc
+    if value < 1:
+        raise HTTPException(status_code=400, detail=f"{field} must be positive")
+    return value
 
 
 def create_app(
@@ -206,6 +231,45 @@ def create_app(
             raise NotAuthenticated()
         return exc.detail
 
+    def validate_binding(
+        session: Session,
+        parsed_series: int | None,
+        parsed_location: int | None,
+    ) -> None:
+        # Reject binding to a series that does not exist so a stale figure
+        # cannot silently render an empty chart forever.
+        if parsed_series is not None:
+            try:
+                client.series_detail(session.token, parsed_series)
+            except ReadApiError as exc:
+                if exc.status_code == 404:
+                    raise HTTPException(
+                        status_code=400, detail="selected series does not exist"
+                    ) from exc
+                api_failure(exc)
+
+        # A location-scoped figure must pair a series that actually has
+        # readings recorded at that location; otherwise the chart would
+        # render permanently empty for a logger that never served the well.
+        if parsed_location is not None:
+            try:
+                at_location = client.series_at_location(
+                    session.token, parsed_location
+                )
+            except ReadApiError as exc:
+                if exc.status_code == 404:
+                    raise HTTPException(
+                        status_code=400, detail="selected location does not exist"
+                    ) from exc
+                api_failure(exc)
+            if parsed_series is not None and parsed_series not in {
+                item.get("series_id") for item in at_location
+            }:
+                raise HTTPException(
+                    status_code=400,
+                    detail="selected series has no readings at this location",
+                )
+
     # -- authentication ----------------------------------------------------
 
     @app.get("/login", name="login_page", response_class=HTMLResponse)
@@ -273,48 +337,48 @@ def create_app(
         if scope not in SCOPES:
             scope = "personal"
 
-        figures = figure_ops.list_figures(state, scope, session.label)
-        selected_id = ui[scope].get("selected_figure_id")
-        figure = None
-        if selected_id:
-            figure = next(
-                (item for item in figures if item.get("id") == selected_id), None
-            )
+        scenes = figure_ops.list_scenes(state, scope, session.label)
+        selected_scene_id = ui[scope].get("selected_scene_id")
+        scene = next(
+            (item for item in scenes if item.get("id") == selected_scene_id), None
+        )
+        if scene is None and scenes:
+            # A stale or absent selection falls back to the first scene for
+            # display only; the stored selection is left untouched on GET.
+            scene = scenes[0]
+
+        figures = figure_ops.list_scene_figures(scene) if scene else []
+        selected_figure_id = ui[scope].get("selected_figure_id")
+        figure = next(
+            (item for item in figures if item.get("id") == selected_figure_id), None
+        )
 
         range_key = range if range in RANGES else _default_range(settings)
         locations: list[dict[str, Any]] = []
         analytes: list[dict[str, Any]] = []
-        chart: dict[str, Any] | None = None
         error: str | None = None
 
-        try:
-            locations = client.locations(session.token)
-            figure_location = figure.get("location_id") if figure else None
-            if figure_location is not None:
-                # Strict scoping: only series with readings recorded at the
-                # bound location, so the selector matches what the chart can
-                # show for a logger that has also served other wells.
-                analytes = client.series_at_location(
-                    session.token, int(figure_location)
-                )
-            if figure and figure.get("series_id"):
-                series_detail = client.series_detail(
-                    session.token, int(figure["series_id"])
-                )
-                if figure_location is None:
+        if figure is not None:
+            try:
+                locations = client.locations(session.token)
+                figure_location = figure.get("location_id")
+                if figure_location is not None:
+                    # Strict scoping: only series with readings recorded at the
+                    # bound location, so the selector matches what the chart can
+                    # show for a logger that has also served other wells.
+                    analytes = client.series_at_location(
+                        session.token, int(figure_location)
+                    )
+                elif figure.get("series_id"):
                     # Figures saved before location scoping (and deliberately
-                    # un-scoped ones) keep the whole series selectable; the
-                    # chart then spans every location the logger served.
-                    analytes = [series_detail]
-                chart = chart_payload(
-                    session,
-                    series_detail,
-                    range_key,
-                    location_id=figure_location,
-                    location_names=_names_from_locations(locations),
-                )
-        except ReadApiError as exc:
-            error = api_failure(exc)
+                    # un-scoped ones) keep the whole series selectable.
+                    analytes = [
+                        client.series_detail(
+                            session.token, int(figure["series_id"])
+                        )
+                    ]
+            except ReadApiError as exc:
+                error = api_failure(exc)
 
         return templates.TemplateResponse(
             request,
@@ -323,12 +387,15 @@ def create_app(
                 request,
                 session,
                 scope=scope,
+                scenes=scenes,
+                scene=scene,
                 figures=figures,
                 figure=figure,
+                selected_scene_id=scene.get("id") if scene else None,
+                selected_figure_id=figure.get("id") if figure else None,
                 ui=ui,
                 locations=locations,
                 analytes=analytes,
-                chart=chart,
                 range_key=range_key,
                 can_edit=figure_ops.can_edit(
                     scope, session.label, settings.shared_editors
@@ -382,13 +449,22 @@ def create_app(
     @app.get("/partials/chart", name="chart_partial", response_class=HTMLResponse)
     def chart_partial(
         request: Request,
+        scene_id: str = Query(...),
         figure_id: str = Query(...),
         scope: str = Query("personal"),
         range: str = Query(DEFAULT_RANGE),
         session: Session = Depends(require_session),
     ) -> Response:
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail="unknown scope")
+
         state = store.load()
-        figure = figure_ops.get_figure(state, scope, session.label, figure_id)
+        scene = figure_ops.get_scene(state, scope, session.label, scene_id)
+        if scene is None:
+            raise HTTPException(status_code=404, detail="scene not found")
+        figure = figure_ops.get_scene_figure(
+            state, scope, session.label, scene_id, figure_id
+        )
         if figure is None:
             raise HTTPException(status_code=404, detail="figure not found")
 
@@ -422,33 +498,141 @@ def create_app(
                 "chart": chart,
                 "error": error,
                 "figure": figure,
+                "scene": scene,
+                "scope": scope,
+                "range_key": range_key,
             },
         )
 
-    # -- figure mutations --------------------------------------------------
+    # -- scene and figure mutations ---------------------------------------
 
-    @app.post("/figures", name="create_figure")
-    def create_figure(
+    @app.post("/scenes", name="create_scene")
+    def create_scene(
         request: Request,
         scope: str = Form("personal"),
+        name: str = Form(""),
         session: Session = Depends(require_session),
     ) -> Response:
         if scope not in SCOPES:
             raise HTTPException(status_code=400, detail="unknown scope")
         try:
             store.mutate(
-                lambda state: figure_ops.create_figure(
-                    state, scope, session.label, settings.shared_editors
+                lambda state: figure_ops.create_scene(
+                    state,
+                    scope,
+                    session.label,
+                    settings.shared_editors,
+                    name=name or None,
                 )
             )
         except FigurePermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FigureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
         return redirect(request)
 
-    @app.post("/figures/{scope}/{figure_id}", name="update_figure")
-    def update_figure(
+    @app.post("/scenes/{scope}/{scene_id}", name="update_scene")
+    def update_scene(
         request: Request,
         scope: str,
+        scene_id: str,
+        name: str = Form(""),
+        cols: str = Form(""),
+        row_height: str = Form(""),
+        session: Session = Depends(require_session),
+    ) -> Response:
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail="unknown scope")
+        cleaned = name.strip()
+        if not cleaned:
+            raise HTTPException(status_code=400, detail="name must not be blank")
+        parsed_cols = _parse_positive_int(cols, "grid cols")
+        parsed_row_height = _parse_positive_int(row_height, "grid row height")
+
+        try:
+            store.mutate(
+                lambda state: figure_ops.update_scene(
+                    state,
+                    scope,
+                    session.label,
+                    settings.shared_editors,
+                    scene_id,
+                    name=cleaned,
+                    grid={"cols": parsed_cols, "row_height": parsed_row_height},
+                )
+            )
+        except SceneNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except FigurePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FigureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return redirect(request)
+
+    @app.post("/scenes/{scope}/{scene_id}/delete", name="delete_scene")
+    def delete_scene(
+        request: Request,
+        scope: str,
+        scene_id: str,
+        session: Session = Depends(require_session),
+    ) -> Response:
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail="unknown scope")
+        try:
+            store.mutate(
+                lambda state: figure_ops.delete_scene(
+                    state,
+                    scope,
+                    session.label,
+                    settings.shared_editors,
+                    scene_id,
+                )
+            )
+        except SceneNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except FigurePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        return redirect(request)
+
+    @app.post(
+        "/scenes/{scope}/{scene_id}/figures", name="create_scene_figure"
+    )
+    def create_scene_figure(
+        request: Request,
+        scope: str,
+        scene_id: str,
+        name: str = Form(""),
+        session: Session = Depends(require_session),
+    ) -> Response:
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail="unknown scope")
+        try:
+            store.mutate(
+                lambda state: figure_ops.create_scene_figure(
+                    state,
+                    scope,
+                    session.label,
+                    settings.shared_editors,
+                    scene_id,
+                    name=name or None,
+                )
+            )
+        except SceneNotFound as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except FigurePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FigureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return redirect(request)
+
+    @app.post(
+        "/scenes/{scope}/{scene_id}/figures/{figure_id}",
+        name="update_scene_figure",
+    )
+    def update_scene_figure(
+        request: Request,
+        scope: str,
+        scene_id: str,
         figure_id: str,
         name: str = Form(""),
         series_id: str = Form(""),
@@ -460,59 +644,23 @@ def create_app(
         cleaned = name.strip()
         if not cleaned:
             raise HTTPException(status_code=400, detail="name must not be blank")
-        parsed_series: int | None
-        try:
-            parsed_series = int(series_id) if series_id.strip() else None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid series") from exc
-        parsed_location: int | None
-        try:
-            parsed_location = int(location_id) if location_id.strip() else None
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="invalid location") from exc
-
-        # Reject binding to a series that does not exist so a stale figure
-        # cannot silently render an empty chart forever.
-        if parsed_series is not None:
-            try:
-                client.series_detail(session.token, parsed_series)
-            except ReadApiError as exc:
-                if exc.status_code == 404:
-                    raise HTTPException(
-                        status_code=400, detail="selected series does not exist"
-                    ) from exc
-                api_failure(exc)
-
-        # A location-scoped figure must pair a series that actually has
-        # readings recorded at that location; otherwise the chart would
-        # render permanently empty for a logger that never served the well.
-        if parsed_location is not None:
-            try:
-                at_location = client.series_at_location(
-                    session.token, parsed_location
-                )
-            except ReadApiError as exc:
-                if exc.status_code == 404:
-                    raise HTTPException(
-                        status_code=400, detail="selected location does not exist"
-                    ) from exc
-                api_failure(exc)
-            if parsed_series is not None and parsed_series not in {
-                item.get("series_id") for item in at_location
-            }:
-                raise HTTPException(
-                    status_code=400,
-                    detail="selected series has no readings at this location",
-                )
+        parsed_series = _parse_optional_int(series_id, "series")
+        parsed_location = _parse_optional_int(location_id, "location")
+        validate_binding(session, parsed_series, parsed_location)
 
         def operation(state: dict[str, Any]) -> dict[str, Any]:
-            existing = figure_ops.get_figure(state, scope, session.label, figure_id)
-            config = dict(existing.get("config") or {}) if existing else {}
-            return figure_ops.update_figure(
+            existing = figure_ops.get_scene_figure(
+                state, scope, session.label, scene_id, figure_id
+            )
+            if existing is None:
+                raise FigureNotFound("figure not found")
+            config = dict(existing.get("config") or {})
+            return figure_ops.update_scene_figure(
                 state,
                 scope,
                 session.label,
                 settings.shared_editors,
+                scene_id,
                 figure_id,
                 name=cleaned,
                 series_id=parsed_series,
@@ -522,7 +670,7 @@ def create_app(
 
         try:
             store.mutate(operation)
-        except FigureNotFound as exc:
+        except (SceneNotFound, FigureNotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FigurePermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -530,10 +678,14 @@ def create_app(
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return redirect(request)
 
-    @app.post("/figures/{scope}/{figure_id}/delete", name="delete_figure")
-    def delete_figure(
+    @app.post(
+        "/scenes/{scope}/{scene_id}/figures/{figure_id}/delete",
+        name="delete_scene_figure",
+    )
+    def delete_scene_figure(
         request: Request,
         scope: str,
+        scene_id: str,
         figure_id: str,
         session: Session = Depends(require_session),
     ) -> Response:
@@ -541,15 +693,16 @@ def create_app(
             raise HTTPException(status_code=400, detail="unknown scope")
         try:
             store.mutate(
-                lambda state: figure_ops.delete_figure(
+                lambda state: figure_ops.delete_scene_figure(
                     state,
                     scope,
                     session.label,
                     settings.shared_editors,
+                    scene_id,
                     figure_id,
                 )
             )
-        except FigureNotFound as exc:
+        except (SceneNotFound, FigureNotFound) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except FigurePermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -570,10 +723,11 @@ def create_app(
         )
         return redirect(request)
 
-    @app.post("/ui/select", name="select_figure")
-    def select_figure(
+    @app.post("/ui/select", name="select_context")
+    def select_context(
         request: Request,
         scope: str = Form("personal"),
+        scene_id: str = Form(""),
         figure_id: str = Form(""),
         session: Session = Depends(require_session),
     ) -> Response:
@@ -581,18 +735,39 @@ def create_app(
             raise HTTPException(status_code=400, detail="unknown scope")
 
         def operation(state: dict[str, Any]) -> None:
-            exists = bool(figure_id) and (
-                figure_ops.get_figure(state, scope, session.label, figure_id)
-                is not None
+            scene = (
+                figure_ops.get_scene(state, scope, session.label, scene_id)
+                if scene_id
+                else None
             )
+            if scene_id and scene is None:
+                raise SceneNotFound("scene not found")
+
+            selected_figure_id = None
+            if scene is not None and figure_id:
+                figure = figure_ops.get_scene_figure(
+                    state, scope, session.label, scene["id"], figure_id
+                )
+                if figure is None:
+                    raise FigureNotFound("figure not found")
+                selected_figure_id = figure_id
+
             figure_ops.set_ui(
                 state,
                 session.label,
                 view=scope,
-                **{scope: {"selected_figure_id": figure_id if exists else None}},
+                **{
+                    scope: {
+                        "selected_scene_id": scene.get("id") if scene else None,
+                        "selected_figure_id": selected_figure_id,
+                    }
+                },
             )
 
-        store.mutate(operation)
+        try:
+            store.mutate(operation)
+        except (SceneNotFound, FigureNotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return redirect(request)
 
     @app.post("/ui/toggle-folders", name="toggle_folders")
@@ -611,6 +786,27 @@ def create_app(
                 state,
                 session.label,
                 **{target: {"folders_collapsed": not collapsed}},
+            )
+
+        store.mutate(operation)
+        return redirect(request)
+
+    @app.post("/ui/toggle-options", name="toggle_options")
+    def toggle_options(
+        request: Request,
+        scope: str = Form(""),
+        session: Session = Depends(require_session),
+    ) -> Response:
+        def operation(state: dict[str, Any]) -> None:
+            ui = figure_ops.get_ui(state, session.label)
+            target = scope if scope in SCOPES else ui.get("view", "personal")
+            if target not in SCOPES:
+                target = "personal"
+            collapsed = bool(ui[target].get("options_collapsed"))
+            figure_ops.set_ui(
+                state,
+                session.label,
+                **{target: {"options_collapsed": not collapsed}},
             )
 
         store.mutate(operation)

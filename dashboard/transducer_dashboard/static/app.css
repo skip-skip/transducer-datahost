@@ -78,31 +78,38 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
 
 .app {
   display: grid;
-  grid-template-columns: 260px 1fr;
-  min-height: 100vh;
+  grid-template-columns: 240px 300px minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
 }
 
-.app.sidebar-collapsed { grid-template-columns: 0 1fr; }
-.app.sidebar-collapsed .sidebar { display: none; }
+.app.scenes-collapsed { grid-template-columns: 0 300px minmax(0, 1fr); }
+.app.scenes-collapsed .scenes-pane { display: none; }
+.app.options-collapsed { grid-template-columns: 240px 0 minmax(0, 1fr); }
+.app.options-collapsed .options-pane { display: none; }
+.app.scenes-collapsed.options-collapsed { grid-template-columns: 0 0 minmax(0, 1fr); }
 
-.sidebar {
+.scenes-pane,
+.options-pane {
   background: var(--panel);
   border-right: 1px solid var(--line);
-  padding: 1rem;
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  min-height: 100vh;
+  min-height: 0;
+  padding: 1rem;
 }
 
-.sidebar-header {
+.options-pane { overflow-y: auto; }
+
+.pane-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
   font-size: 1.05rem;
 }
 
-.sidebar-footer {
+.pane-footer {
   margin-top: auto;
   display: flex;
   align-items: center;
@@ -127,10 +134,10 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
 .tab { width: 100%; font-size: 0.9rem; }
 .tab.active { background: var(--accent-soft); border-color: #b9c9f4; color: var(--accent); }
 
-.new-figure { margin-top: 0.25rem; }
-.new-figure button { width: 100%; }
+.new-scene { margin-top: 0.25rem; }
+.new-scene button { width: 100%; }
 
-.figure-list {
+.scene-list {
   list-style: none;
   margin: 0;
   padding: 0;
@@ -138,9 +145,10 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
   flex-direction: column;
   gap: 0.2rem;
   overflow-y: auto;
+  min-height: 0;
 }
 
-.figure-link {
+.scene-link {
   width: 100%;
   text-align: left;
   border: 1px solid transparent;
@@ -151,10 +159,10 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
   gap: 0.4rem;
 }
 
-.figure-link:hover { background: #f2f4f7; }
-.figure-link.active { background: var(--accent-soft); border-color: #b9c9f4; color: var(--accent); }
+.scene-link:hover { background: #f2f4f7; }
+.scene-link.active { background: var(--accent-soft); border-color: #b9c9f4; color: var(--accent); }
 
-.figure-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.scene-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .badge {
   font-size: 0.7rem;
@@ -164,27 +172,122 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
   padding: 0.05rem 0.4rem;
 }
 
-.main { padding: 1.5rem 2rem; position: relative; }
-.expand-form { position: absolute; top: 1rem; left: 1rem; }
+.options-title {
+  margin: 0;
+  font-size: 1rem;
+  overflow-wrap: anywhere;
+}
 
-.figure-form { max-width: 640px; display: grid; gap: 1rem; }
-
+.options-form { display: grid; gap: 0.9rem; }
+.field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
 .field { display: grid; gap: 0.3rem; }
 .field label { font-weight: 600; font-size: 0.85rem; color: var(--muted); }
-
 .actions { display: flex; gap: 0.5rem; }
+.inline-form { margin-top: 0.25rem; }
+.options-pane .danger { width: 100%; }
 
-.range-bar { display: flex; gap: 0.4rem; margin: 1.25rem 0 0.75rem; }
+.workspace {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 1rem;
+}
+
+.expand-form { position: absolute; z-index: 3; }
+.expand-scenes { top: 0.75rem; left: 0.75rem; }
+.expand-options { top: 0.75rem; right: 0.75rem; }
+
+.scene-grid {
+  display: grid;
+  gap: 0.75rem;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.scene-empty { margin-top: 1rem; }
+
+.figure-panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.figure-panel.active {
+  border-color: #b9c9f4;
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.35rem 0.5rem;
+  border-bottom: 1px solid var(--line);
+  background: #fbfcfd;
+  min-width: 0;
+}
+
+.panel-header form { flex: 1; min-width: 0; }
+
+.panel-title {
+  border: none;
+  background: none;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.panel-ranges { display: flex; gap: 0.15rem; flex-shrink: 0; }
+.panel-ranges .range { padding: 0.15rem 0.35rem; font-size: 0.75rem; }
 .range.active { background: var(--accent-soft); border-color: #b9c9f4; color: var(--accent); }
 
-#chart { max-width: 1100px; }
-.chart .plot { width: 100%; height: 480px; }
+.panel-body { flex: 1; min-height: 0; padding: 0.25rem; }
+.panel-chart { width: 100%; height: 100%; min-height: 0; }
+.panel-chart .hint { padding: 0.5rem; }
+.panel-chart .chart,
+.panel-chart .chart .plot { width: 100%; height: 100%; }
 
 .empty { max-width: 480px; margin: 12vh auto; text-align: center; }
 .empty h1 { font-size: 1.3rem; }
 
-@media (max-width: 720px) {
-  .app { grid-template-columns: 1fr; }
-  .sidebar { min-height: auto; border-right: none; border-bottom: 1px solid var(--line); }
-  .main { padding: 1rem; }
+@media (max-width: 1200px) {
+  .app { grid-template-columns: 220px 260px minmax(0, 1fr); }
+  .app.scenes-collapsed { grid-template-columns: 0 260px minmax(0, 1fr); }
+  .app.options-collapsed { grid-template-columns: 220px 0 minmax(0, 1fr); }
+}
+
+@media (max-width: 900px) {
+  .app,
+  .app.scenes-collapsed,
+  .app.options-collapsed,
+  .app.scenes-collapsed.options-collapsed {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto minmax(0, 1fr);
+    height: auto;
+    min-height: 100vh;
+    overflow: visible;
+  }
+
+  .scenes-pane,
+  .options-pane {
+    border-right: none;
+    border-bottom: 1px solid var(--line);
+    max-height: 45vh;
+  }
+
+  .app.scenes-collapsed .scenes-pane,
+  .app.options-collapsed .options-pane { display: none; }
+
+  .workspace { min-height: 60vh; }
+  .expand-form { display: none; }
 }

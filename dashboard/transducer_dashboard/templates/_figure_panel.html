@@ -1,0 +1,35 @@
+<article class="figure-panel{% if selected_figure_id == figure_item.id %} active{% endif %}"
+         data-figure-id="{{ figure_item.id }}"
+         data-x="{{ figure_item.layout.x }}"
+         data-y="{{ figure_item.layout.y }}"
+         data-w="{{ figure_item.layout.w }}"
+         data-h="{{ figure_item.layout.h }}"
+         style="grid-column: {{ figure_item.layout.x + 1 }} / span {{ figure_item.layout.w }}; grid-row: {{ figure_item.layout.y + 1 }} / span {{ figure_item.layout.h }};">
+  <header class="panel-header">
+    <form method="post" action="{{ url_for('select_context') }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="scene_id" value="{{ scene.id }}">
+      <input type="hidden" name="figure_id" value="{{ figure_item.id }}">
+      <button type="submit" class="panel-title" title="Select {{ figure_item.name }}">
+        {{ figure_item.name }}
+        {% if scope == 'shared' and figure_item.created_by %}
+        <span class="badge">{{ figure_item.created_by }}</span>
+        {% endif %}
+      </button>
+    </form>
+    <div class="panel-ranges" role="group" aria-label="Chart range">
+      {% for key in ranges %}
+      <button type="button" class="range{% if key == range_key %} active{% endif %}"
+              hx-get="{{ url_for('chart_partial') }}?scope={{ scope }}&scene_id={{ scene.id }}&figure_id={{ figure_item.id }}&range={{ key }}"
+              hx-target="#chart-{{ figure_item.id }}" hx-swap="innerHTML">{{ key }}</button>
+      {% endfor %}
+    </div>
+  </header>
+  <div class="panel-body">
+    <div class="panel-chart" id="chart-{{ figure_item.id }}"
+         hx-get="{{ url_for('chart_partial') }}?scope={{ scope }}&scene_id={{ scene.id }}&figure_id={{ figure_item.id }}&range={{ range_key }}"
+         hx-trigger="load" hx-swap="innerHTML">
+      <p class="hint">Loading chart&hellip;</p>
+    </div>
+  </div>
+</article>

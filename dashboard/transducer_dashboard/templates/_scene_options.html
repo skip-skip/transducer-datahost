@@ -1,0 +1,40 @@
+<h2 class="options-title">{{ scene.name }}</h2>
+<p class="hint">{{ scene.figures | length }} figure{% if scene.figures | length != 1 %}s{% endif %} in this scene.</p>
+
+{% if can_edit %}
+<form class="options-form" method="post"
+      action="{{ url_for('update_scene', scope=scope, scene_id=scene.id) }}">
+  <div class="field">
+    <label for="scene-name">Scene name</label>
+    <input id="scene-name" name="name" value="{{ scene.name }}" required>
+  </div>
+  <div class="field-row">
+    <div class="field">
+      <label for="grid-cols">Grid columns</label>
+      <input id="grid-cols" name="cols" type="number" min="1" step="1"
+             value="{{ scene.grid.cols }}" required>
+    </div>
+    <div class="field">
+      <label for="grid-row-height">Row height (px)</label>
+      <input id="grid-row-height" name="row_height" type="number" min="1" step="1"
+             value="{{ scene.grid.row_height }}" required>
+    </div>
+  </div>
+  <div class="actions">
+    <button type="submit">Save scene</button>
+  </div>
+</form>
+
+<form method="post" class="inline-form"
+      action="{{ url_for('create_scene_figure', scope=scope, scene_id=scene.id) }}">
+  <button type="submit">+ Add figure</button>
+</form>
+
+<form method="post"
+      action="{{ url_for('delete_scene', scope=scope, scene_id=scene.id) }}"
+      onsubmit="return confirm('Delete this scene and its figures?');">
+  <button type="submit" class="danger">Delete scene</button>
+</form>
+{% else %}
+<p class="hint">Read-only shared scene.</p>
+{% endif %}

@@ -611,9 +611,9 @@ several locations into one chart.
 
 ---
 
-## ADR-028: Scene-based grid dashboard with versioned JSON state (planned)
+## ADR-028: Scene-based grid dashboard with versioned JSON state
 
-**Status:** Proposed (state layer implemented; scene/grid UI pending)
+**Status:** Accepted (state layer and server-rendered scene shell implemented; grid interactions pending)
 
 **Context:** The current dashboard (ADR-026/027) shows one figure at a time from flat personal/shared lists backed by
 `state.json` `version: 1`. The desired UX is scene-based: scenes (flat containers of figures) listed in the left pane,
@@ -621,7 +621,7 @@ a multi-figure grid workspace where figures act as panels that drag/resize and s
 options pane for the selected figure or scene. This requires richer layout persistence, multi-chart rendering, and a new
 state shape, while preserving the no-database, read-API-only boundaries.
 
-**Decision (planned):** Redesign the dashboard UI and state without changing the database, read API contracts, or
+**Decision:** Redesign the dashboard UI and state without changing the database, read API contracts, or
 security model:
 
 - **State:** evolve dashboard JSON state to **`version: 2`** introducing scenes, per-figure grid layout, and

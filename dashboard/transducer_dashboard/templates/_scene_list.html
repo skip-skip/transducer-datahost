@@ -1,0 +1,36 @@
+<div class="scope-tabs">
+  <form method="post" action="{{ url_for('set_view') }}">
+    <input type="hidden" name="scope" value="personal">
+    <button type="submit" class="tab{% if scope == 'personal' %} active{% endif %}">My scenes</button>
+  </form>
+  <form method="post" action="{{ url_for('set_view') }}">
+    <input type="hidden" name="scope" value="shared">
+    <button type="submit" class="tab{% if scope == 'shared' %} active{% endif %}">Shared</button>
+  </form>
+</div>
+
+{% if can_edit %}
+<form method="post" action="{{ url_for('create_scene') }}" class="new-scene">
+  <input type="hidden" name="scope" value="{{ scope }}">
+  <button type="submit">+ New scene</button>
+</form>
+{% else %}
+<p class="hint">Read-only shared view.</p>
+{% endif %}
+
+<ul class="scene-list">
+  {% for item in scenes %}
+  <li>
+    <form method="post" action="{{ url_for('select_context') }}">
+      <input type="hidden" name="scope" value="{{ scope }}">
+      <input type="hidden" name="scene_id" value="{{ item.id }}">
+      <button type="submit" class="scene-link{% if scene and scene.id == item.id %} active{% endif %}">
+        <span class="scene-name">{{ item.name }}</span>
+        <span class="badge">{{ item.figures | length }}</span>
+      </button>
+    </form>
+  </li>
+  {% else %}
+  <li class="hint">No scenes yet.</li>
+  {% endfor %}
+</ul>

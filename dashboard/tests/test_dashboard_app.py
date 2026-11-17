@@ -150,12 +150,57 @@ def read_state(tmp_path):
     return json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
 
 
-def personal_figures(state, label="alice"):
-    return state["personal"][label]["scenes"][0]["figures"]
+def scenes_for(state, scope="personal", label="alice"):
+    if scope == "shared":
+        return state["shared"]["scenes"]
+    return state["personal"][label]["scenes"]
 
 
-def shared_figures(state):
-    return state["shared"]["scenes"][0]["figures"]
+def find_scene(tmp_path, scene_id, scope="personal", label="alice"):
+    state = read_state(tmp_path)
+    return next(
+        scene
+        for scene in scenes_for(state, scope, label)
+        if scene["id"] == scene_id
+    )
+
+
+def find_figure(tmp_path, scene_id, figure_id, scope="personal", label="alice"):
+    scene = find_scene(tmp_path, scene_id, scope, label)
+    return next(figure for figure in scene["figures"] if figure["id"] == figure_id)
+
+
+def create_scene(
+    test_client: TestClient,
+    tmp_path,
+    *,
+    scope="personal",
+    name="Scene",
+    label="alice",
+):
+    response = test_client.post(
+        "/scenes", data={"scope": scope, "name": name}, follow_redirects=False
+    )
+    assert response.status_code == 303
+    return scenes_for(read_state(tmp_path), scope, label)[-1]
+
+
+def create_figure(
+    test_client: TestClient,
+    tmp_path,
+    scene,
+    *,
+    scope="personal",
+    name="",
+    label="alice",
+):
+    response = test_client.post(
+        f"/scenes/{scope}/{scene['id']}/figures",
+        data={"scope": scope, "name": name},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    return find_scene(tmp_path, scene["id"], scope, label)["figures"][-1]
 
 
 def test_health_is_public(client: TestClient) -> None:
@@ -202,55 +247,91 @@ def test_login_sets_hardened_cookie(client: TestClient) -> None:
     assert "Path=/" in cookie
 
 
-def test_authenticated_index_renders(client: TestClient) -> None:
+def test_authenticated_index_renders_scene_shell(client: TestClient) -> None:
     login(client)
 
     response = client.get("/")
 
     assert response.status_code == 200
-    assert "No figure selected" in response.text
+    assert "No scene selected" in response.text
+    assert "My scenes" in response.text
+    assert "Options" in response.text
     assert "alice" in response.text
 
 
-def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
+def test_create_scene_and_figure(client: TestClient, tmp_path) -> None:
     login(client)
 
-    created = client.post(
-        "/figures", data={"scope": "personal"}, follow_redirects=False
-    )
-    assert created.status_code == 303
+    scene = create_scene(client, tmp_path, name="Well field")
+    assert scene["name"] == "Well field"
+    assert scene["grid"] == {"cols": 12, "row_height": 220}
+    assert scene["figures"] == []
 
-    state = read_state(tmp_path)
-    figures = personal_figures(state)
-    assert len(figures) == 1
-    figure_id = figures[0]["id"]
-    assert figures[0]["name"] == "Untitled figure"
+    ui = read_state(tmp_path)["personal"]["alice"]["ui"]
+    assert ui["personal"]["selected_scene_id"] == scene["id"]
+    assert ui["personal"]["selected_figure_id"] is None
+
+    figure = create_figure(client, tmp_path, scene)
+    assert figure["name"] == "Untitled figure"
+    assert figure["layout"] == {"x": 0, "y": 0, "w": 6, "h": 2}
+
+    ui = read_state(tmp_path)["personal"]["alice"]["ui"]
+    assert ui["personal"]["selected_figure_id"] == figure["id"]
+
+    page = client.get("/")
+    assert page.status_code == 200
+    assert "Well field" in page.text
+    assert "Untitled figure" in page.text
+    assert 'class="scene-grid"' in page.text
+    assert f'data-scene-id="{scene["id"]}"' in page.text
+    assert "panel-chart" in page.text
+    assert (
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}" in page.text
+    )
+
+
+def test_update_and_delete_figure(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     updated = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "GC-1980 water level", "series_id": "42", "location_id": "7"},
         follow_redirects=False,
     )
     assert updated.status_code == 303
 
-    state = read_state(tmp_path)
-    figure = personal_figures(state)[0]
-    assert figure["name"] == "GC-1980 water level"
-    assert figure["series_id"] == 42
-    assert figure["location_id"] == 7
+    stored = find_figure(tmp_path, scene["id"], figure["id"])
+    assert stored["name"] == "GC-1980 water level"
+    assert stored["series_id"] == 42
+    assert stored["location_id"] == 7
+
+    chart = client.get(
+        "/partials/chart",
+        params={
+            "scene_id": scene["id"],
+            "figure_id": figure["id"],
+            "scope": "personal",
+            "range": "24h",
+        },
+    )
+    assert chart.status_code == 200
+    assert "chart-data" in chart.text
+    assert "1.25" in chart.text
+    assert "MCMW-04" in chart.text
+    assert "LEVEL (m)" in chart.text
 
     page = client.get("/")
     assert page.status_code == 200
     assert "GC-1980 water level" in page.text
-    assert "chart-data" in page.text
-    assert "MCMW-04" in page.text
-    assert "LEVEL (m)" in page.text
 
     deleted = client.post(
-        f"/figures/personal/{figure_id}/delete", follow_redirects=False
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}/delete",
+        follow_redirects=False,
     )
     assert deleted.status_code == 303
-    assert personal_figures(read_state(tmp_path)) == []
+    assert find_scene(tmp_path, scene["id"])["figures"] == []
 
 
 def test_location_scoped_chart_requests_location_points(tmp_path) -> None:
@@ -258,18 +339,25 @@ def test_location_scoped_chart_requests_location_points(tmp_path) -> None:
     app = create_app(make_settings(tmp_path), fake)
     with TestClient(app) as test_client:
         login(test_client)
-        test_client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-        figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+        scene = create_scene(test_client, tmp_path)
+        figure = create_figure(test_client, tmp_path, scene)
         saved = test_client.post(
-            f"/figures/personal/{figure_id}",
+            f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
             data={"name": "MCMW-04 level", "series_id": "42", "location_id": "7"},
             follow_redirects=False,
         )
         assert saved.status_code == 303
 
-        page = test_client.get("/")
-        assert page.status_code == 200
-        assert "chart-data" in page.text
+        chart = test_client.get(
+            "/partials/chart",
+            params={
+                "scene_id": scene["id"],
+                "figure_id": figure["id"],
+                "scope": "personal",
+            },
+        )
+        assert chart.status_code == 200
+        assert "chart-data" in chart.text
 
         assert fake.points_calls, "the chart render should request points"
         assert all(call["location_id"] == 7 for call in fake.points_calls)
@@ -279,33 +367,43 @@ def test_legacy_figure_without_location_charts_whole_series(
     client: TestClient, tmp_path
 ) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     saved = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "Legacy", "series_id": "42"},
         follow_redirects=False,
     )
     assert saved.status_code == 303
 
-    figure = personal_figures(read_state(tmp_path))[0]
-    assert figure["series_id"] == 42
-    assert figure.get("location_id") is None
+    stored = find_figure(tmp_path, scene["id"], figure["id"])
+    assert stored["series_id"] == 42
+    assert stored.get("location_id") is None
 
     page = client.get("/")
     assert page.status_code == 200
     assert "All locations" in page.text
-    assert "chart-data" in page.text
+
+    chart = client.get(
+        "/partials/chart",
+        params={
+            "scene_id": scene["id"],
+            "figure_id": figure["id"],
+            "scope": "personal",
+        },
+    )
+    assert chart.status_code == 200
+    assert "chart-data" in chart.text
 
 
 def test_update_rejects_blank_name(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     response = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "   ", "series_id": ""},
         follow_redirects=False,
     )
@@ -315,11 +413,11 @@ def test_update_rejects_blank_name(client: TestClient, tmp_path) -> None:
 
 def test_update_rejects_unknown_series(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     response = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "Broken", "series_id": "999"},
         follow_redirects=False,
     )
@@ -330,11 +428,11 @@ def test_update_rejects_unknown_series(client: TestClient, tmp_path) -> None:
 
 def test_update_rejects_series_not_at_location(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     response = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "Broken", "series_id": "42", "location_id": "8"},
         follow_redirects=False,
     )
@@ -345,11 +443,11 @@ def test_update_rejects_series_not_at_location(client: TestClient, tmp_path) -> 
 
 def test_update_rejects_unknown_location(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     response = client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "Broken", "series_id": "42", "location_id": "999"},
         follow_redirects=False,
     )
@@ -358,29 +456,34 @@ def test_update_rejects_unknown_location(client: TestClient, tmp_path) -> None:
     assert "location does not exist" in response.text
 
 
-def test_shared_figure_permissions(tmp_path) -> None:
+def test_shared_scene_permissions(tmp_path) -> None:
     app = create_app(
         make_settings(tmp_path, shared_editors=frozenset({"alice"})),
         FakeReadClient(),
     )
     with TestClient(app) as test_client:
         login(test_client, "good")
-        allowed = test_client.post(
-            "/figures", data={"scope": "shared"}, follow_redirects=False
-        )
-        assert allowed.status_code == 303
-        assert len(shared_figures(read_state(tmp_path))) == 1
+        scene = create_scene(test_client, tmp_path, scope="shared", name="Shared ops")
+        assert len(scenes_for(read_state(tmp_path), "shared")) == 1
 
         login(test_client, "viewer")
         denied = test_client.post(
-            "/figures", data={"scope": "shared"}, follow_redirects=False
+            "/scenes", data={"scope": "shared"}, follow_redirects=False
         )
         assert denied.status_code == 403
+
+        denied_figure = test_client.post(
+            f"/scenes/shared/{scene['id']}/figures",
+            data={"scope": "shared"},
+            follow_redirects=False,
+        )
+        assert denied_figure.status_code == 403
 
         test_client.post("/ui/view", data={"scope": "shared"}, follow_redirects=False)
         page = test_client.get("/")
         assert page.status_code == 200
         assert "Read-only shared view." in page.text
+        assert "Shared ops" in page.text
 
 
 def test_toggle_folders_persists(client: TestClient, tmp_path) -> None:
@@ -395,6 +498,153 @@ def test_toggle_folders_persists(client: TestClient, tmp_path) -> None:
     assert response.status_code == 303
     ui = read_state(tmp_path)["personal"]["alice"]["ui"]
     assert ui["personal"]["folders_collapsed"] is True
+
+
+def test_toggle_options_persists(client: TestClient, tmp_path) -> None:
+    login(client)
+
+    response = client.post(
+        "/ui/toggle-options",
+        data={"scope": "personal"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+    ui = read_state(tmp_path)["personal"]["alice"]["ui"]
+    assert ui["personal"]["options_collapsed"] is True
+
+    page = client.get("/")
+    assert "options-collapsed" in page.text
+
+
+def test_select_scene_and_figure(client: TestClient, tmp_path) -> None:
+    login(client)
+    first_scene = create_scene(client, tmp_path, name="First")
+    second_scene = create_scene(client, tmp_path, name="Second")
+    first_figure = create_figure(client, tmp_path, first_scene)
+    create_figure(client, tmp_path, second_scene)
+
+    selected = client.post(
+        "/ui/select",
+        data={"scope": "personal", "scene_id": first_scene["id"], "figure_id": ""},
+        follow_redirects=False,
+    )
+    assert selected.status_code == 303
+    ui = read_state(tmp_path)["personal"]["alice"]["ui"]["personal"]
+    assert ui["selected_scene_id"] == first_scene["id"]
+    assert ui["selected_figure_id"] is None
+
+    selected = client.post(
+        "/ui/select",
+        data={
+            "scope": "personal",
+            "scene_id": first_scene["id"],
+            "figure_id": first_figure["id"],
+        },
+        follow_redirects=False,
+    )
+    assert selected.status_code == 303
+    ui = read_state(tmp_path)["personal"]["alice"]["ui"]["personal"]
+    assert ui["selected_scene_id"] == first_scene["id"]
+    assert ui["selected_figure_id"] == first_figure["id"]
+
+    page = client.get("/")
+    assert "figure-panel active" in page.text
+    assert f"/scenes/personal/{first_scene['id']}/figures/{first_figure['id']}" in page.text
+
+
+def test_select_rejects_figure_from_another_scene(
+    client: TestClient, tmp_path
+) -> None:
+    login(client)
+    first_scene = create_scene(client, tmp_path, name="First")
+    second_scene = create_scene(client, tmp_path, name="Second")
+    other_figure = create_figure(client, tmp_path, second_scene)
+
+    response = client.post(
+        "/ui/select",
+        data={
+            "scope": "personal",
+            "scene_id": first_scene["id"],
+            "figure_id": other_figure["id"],
+        },
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 404
+
+
+def test_update_scene_grid_and_name(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path, name="Before")
+    figure = create_figure(client, tmp_path, scene)
+
+    response = client.post(
+        f"/scenes/personal/{scene['id']}",
+        data={"name": "After", "cols": "6", "row_height": "180"},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    stored = find_scene(tmp_path, scene["id"])
+    assert stored["name"] == "After"
+    assert stored["grid"] == {"cols": 6, "row_height": 180}
+    assert stored["figures"][0]["id"] == figure["id"]
+    assert stored["figures"][0]["layout"]["w"] <= 6
+
+    invalid = client.post(
+        f"/scenes/personal/{scene['id']}",
+        data={"name": "After", "cols": "0", "row_height": "180"},
+        follow_redirects=False,
+    )
+    assert invalid.status_code == 400
+
+
+def test_delete_scene(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
+
+    response = client.post(
+        f"/scenes/personal/{scene['id']}/delete",
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    state = read_state(tmp_path)
+    assert scenes_for(state) == []
+    ui = state["personal"]["alice"]["ui"]["personal"]
+    assert ui["selected_scene_id"] is None
+    assert ui["selected_figure_id"] is None
+    assert figure["id"] not in json.dumps(state)
+
+    page = client.get("/")
+    assert "No scene selected" in page.text
+
+
+def test_create_figure_rejects_unknown_scene(client: TestClient) -> None:
+    login(client)
+
+    response = client.post(
+        "/scenes/personal/missing/figures",
+        data={"scope": "personal"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 404
+
+
+def test_scene_update_rejects_foreign_scope(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path)
+
+    response = client.post(
+        f"/scenes/shared/{scene['id']}",
+        data={"name": "Nope", "cols": "12", "row_height": "220"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 404
 
 
 def test_analytes_partial_scoped_to_location(client: TestClient) -> None:
@@ -430,17 +680,22 @@ def test_analytes_partial_all_locations_lists_every_series(
 
 def test_chart_partial(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
     client.post(
-        f"/figures/personal/{figure_id}",
+        f"/scenes/personal/{scene['id']}/figures/{figure['id']}",
         data={"name": "Chart", "series_id": "42"},
         follow_redirects=False,
     )
 
     response = client.get(
         "/partials/chart",
-        params={"figure_id": figure_id, "scope": "personal", "range": "24h"},
+        params={
+            "scene_id": scene["id"],
+            "figure_id": figure["id"],
+            "scope": "personal",
+            "range": "24h",
+        },
     )
 
     assert response.status_code == 200
@@ -450,12 +705,37 @@ def test_chart_partial(client: TestClient, tmp_path) -> None:
 
 def test_chart_partial_requires_the_owning_scope(client: TestClient, tmp_path) -> None:
     login(client)
-    client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
 
     response = client.get(
         "/partials/chart",
-        params={"figure_id": figure_id, "scope": "shared", "range": "24h"},
+        params={
+            "scene_id": scene["id"],
+            "figure_id": figure["id"],
+            "scope": "shared",
+            "range": "24h",
+        },
+    )
+
+    assert response.status_code == 404
+
+
+def test_chart_partial_rejects_figure_from_another_scene(
+    client: TestClient, tmp_path
+) -> None:
+    login(client)
+    first_scene = create_scene(client, tmp_path, name="First")
+    second_scene = create_scene(client, tmp_path, name="Second")
+    other_figure = create_figure(client, tmp_path, second_scene)
+
+    response = client.get(
+        "/partials/chart",
+        params={
+            "scene_id": first_scene["id"],
+            "figure_id": other_figure["id"],
+            "scope": "personal",
+        },
     )
 
     assert response.status_code == 404

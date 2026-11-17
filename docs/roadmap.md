@@ -198,7 +198,7 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - [ ] The dashboard container has no `POSTGRES_*` environment variables.
 - [ ] `state.json` backup and restore tested.
 
-## Phase 9 — Dashboard scenes redesign (planned, prep complete in docs)
+## Phase 9 — Dashboard scenes redesign (in progress)
 
 Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/decisions.md](decisions.md).
 
@@ -206,19 +206,18 @@ Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/d
 
 - [x] Evolve dashboard state to **`version: 2`** with **scenes** as flat containers of figures, per-figure grid
   layout (`x`,`y`,`w`,`h`/constraints), scene/grid settings, and per-user UI (selected scene/figure, pane collapse);
-  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety. *(State layer
-  landed; scene/grid UI still pending.)*
-- [ ] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace** (figures as
-  window-like panels that drag/resize and **snap** to the grid), and a **nested options pane** (right of the left pane)
-  showing context-sensitive **scene or figure** options.
-- [ ] Refactor dashboard domain/routes/templates for scene CRUD, figure-in-scene CRUD/binding (preserving ADR-027
-  location scoping), batched layout persistence, and multi-chart rendering (independent Plotly instances, per-figure
-  range/config).
+  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety.
+- [x] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace**, and a
+  **nested options pane** (right of the left pane) showing context-sensitive **scene or figure** options. *(Rendering
+  landed; drag/resize/snap still pending.)*
+- [x] Refactor dashboard domain/routes/templates for scene CRUD, figure-in-scene CRUD/binding (preserving ADR-027
+  location scoping), and multi-chart rendering (independent Plotly instances, per-figure range). *(Batched layout
+  persistence still pending.)*
 - [ ] Add a **vendored, no-build** frontend grid/windowing dependency under `static/vendor/` (license documented) and
   adopt a hybrid interaction model (HTMX/server-rendered structure & forms + client-managed grid/layout callbacks);
   keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**.
-- [ ] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions, layout
-  payloads), and backup/restore notes for v2 state.
+- [x] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions), and
+  backup/restore notes for v2 state. *(Layout-payload tests follow with the grid interaction slice.)*
 
 **Exit criteria**
 

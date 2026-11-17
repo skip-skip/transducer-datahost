@@ -49,9 +49,37 @@
     Array.prototype.forEach.call(charts, renderChart);
   }
 
+  function resizeCharts() {
+    if (typeof Plotly === "undefined") {
+      return;
+    }
+    var plots = document.querySelectorAll("[data-chart] .plot");
+    Array.prototype.forEach.call(plots, function (plot) {
+      Plotly.Plots.resize(plot);
+    });
+  }
+
   document.addEventListener("DOMContentLoaded", function () { renderAll(document); });
 
   document.body.addEventListener("htmx:afterSwap", function (event) {
     renderAll(event.target);
+  });
+
+  document.body.addEventListener("click", function (event) {
+    var button = event.target.closest ? event.target.closest(".range") : null;
+    if (!button) {
+      return;
+    }
+    var group = button.parentElement;
+    var buttons = group ? group.querySelectorAll(".range") : [];
+    Array.prototype.forEach.call(buttons, function (item) {
+      item.classList.toggle("active", item === button);
+    });
+  });
+
+  var resizeTimer = null;
+  window.addEventListener("resize", function () {
+    window.clearTimeout(resizeTimer);
+    resizeTimer = window.setTimeout(resizeCharts, 150);
   });
 })();
