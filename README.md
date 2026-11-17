@@ -5,10 +5,11 @@ TLS-protected upload gateway, a read-only API, and a dashboard for internal anal
 
 > **Status: Phase 4 (VM deployment) pending verification.**
 > The schema, roles, views, grants, `.xle` parser/report, PostgreSQL loader, ingest
-> gateway (upload API + queue worker), read API, and dashboard are implemented. Unit tests
-> pass and the Compose topology is defined. What remains is bringing the stack up on the
-> Linux VM, generating the TLS certificate, and running the acceptance checks. See
-> [docs/roadmap.md](docs/roadmap.md).
+> gateway (upload API + queue worker), read API, dashboard, and Phase 7 operations
+> scripts are implemented. Unit tests pass and the Compose topology is defined. What
+> remains is bringing the stack up on the Linux VM, generating the TLS certificate,
+> running the acceptance checks, and exercising the backup/alert/certificate runbook.
+> See [docs/roadmap.md](docs/roadmap.md).
 
 ## Why this exists
 
@@ -92,7 +93,8 @@ dashboard signs in with a read API token and never receives a database credentia
 | `dashboard/` | Dashboard service: read-token auth, JSON scene state; Panel/Bokeh rework in progress | Partial |
 | `caddy/` | TLS reverse proxy configuration and image | Implemented |
 | `certs/` | Local TLS certificate instructions (certificates not committed) | Instructions |
-| `scripts/` | Manual upload, migration, and (planned) backup/restore helpers | Partial |
+| `scripts/` | Manual upload, migration, backup, restore, and healthcheck helpers | Implemented |
+| `deploy/systemd/` | Backup and healthcheck timers plus the ops environment template | Implemented |
 | `docker-compose.yml` | Full stack: db, migrate, ingest-api, ingest-worker, read-api, dashboard, caddy | Implemented |
 | `.env.example` | Environment template | Template |
 
@@ -177,6 +179,7 @@ db/tests/run_phase1.sh
 - [Data model](docs/data-model.md)
 - [Ingestion design](docs/ingestion.md)
 - [Dashboard](docs/dashboard.md)
+- [Operations runbook](docs/operations.md)
 - [Network and security](docs/network-security.md)
 - [Architecture decisions](docs/decisions.md)
 - [Roadmap and acceptance criteria](docs/roadmap.md)

@@ -136,15 +136,23 @@ Rules:
 
 ## 7. Backups
 
-- Nightly `pg_dump --format=custom` to a network share.
-- Dashboard state is a JSON file, not a database table. Back it up separately with
+- Nightly `pg_dump --format=custom` to a network share, run by
+  `scripts/backup.sh` and the `transducer-backup.timer` systemd unit.
+- Dashboard state is a JSON file, not a database table. The same backup script
+  archives the `dashboard_state` volume. To copy it by hand:
   `docker compose exec dashboard cat /var/lib/transducer-dashboard/state.json`.
+- Restore with `scripts/restore.sh`; see [operations.md](operations.md#4-restore).
 - Retention: 30 daily, 12 monthly (adjust to policy).
 - Backups encrypted at rest by the share/platform.
 - Quarterly restore test into a scratch database.
 - Document recovery point objective (RPO, ~24h) and recovery time objective (RTO).
 
 ## 8. Monitoring and alerting
+
+`scripts/healthcheck.sh` checks every signal in the table below and can post to
+`ALERT_WEBHOOK_URL`; the `transducer-healthcheck.timer` runs it every five
+minutes. See [operations.md](operations.md#5-monitoring-and-alerting) for the
+thresholds and suppression behavior.
 
 | Signal | Source | Action |
 |---|---|---|

@@ -1,0 +1,11 @@
+[Unit]
+Description=Run the transducer healthcheck every five minutes
+
+[Timer]
+OnBootSec=5m
+OnUnitActiveSec=5m
+AccuracySec=30s
+Unit=transducer-healthcheck.service
+
+[Install]
+WantedBy=timers.target

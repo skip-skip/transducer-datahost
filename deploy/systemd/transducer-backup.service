@@ -1,0 +1,19 @@
+[Unit]
+Description=Transducer database and dashboard state backup
+Documentation=file:/opt/transducer_dash/docs/operations.md
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=transducer
+Group=transducer
+WorkingDirectory=/opt/transducer_dash
+EnvironmentFile=-/etc/transducer/ops.env
+ExecStart=/opt/transducer_dash/scripts/backup.sh
+Nice=10
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+NoNewPrivileges=true
+PrivateTmp=true

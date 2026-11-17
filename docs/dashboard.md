@@ -264,6 +264,9 @@ docker compose exec dashboard cat /var/lib/transducer-dashboard/state.json \
   > dashboard-state-$(date +%F).json
 ```
 
+The operations backup script archives the whole volume instead, alongside the
+database: `scripts/backup.sh` (see [operations.md](operations.md#3-backups)).
+
 Restore:
 
 1. `docker compose stop dashboard`.
@@ -271,7 +274,8 @@ Restore:
 3. Ensure ownership by uid 10001 (`appuser`).
 4. `docker compose start dashboard`.
 
-`state.json.bak` holds the previous version. Atomic replace makes a live `cat`
+`scripts/restore.sh --dashboard-state BACKUP.tar.gz --force` automates these
+steps and restores ownership. `state.json.bak` holds the previous version. Atomic replace makes a live `cat`
 safe. A restored version 1 file is archived and replaced as described in
 section 3.
 

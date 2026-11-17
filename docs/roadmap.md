@@ -152,17 +152,25 @@ Linux VM, the TLS certificate, and the production backfill remain.
 
 **Deliverables**
 
-- Backups (cron/systemd) and restore procedure.
-- Monitoring/alerting for ingest failures, stale worker heartbeat, and disk usage.
-- Runbook: start/stop, restore, rotate passwords and tokens, add a new site/logger.
-- Manual upload cadence documented for the operator.
+- [x] Backups (cron/systemd) and restore procedure: `scripts/backup.sh`,
+  `scripts/restore.sh`, and `deploy/systemd/transducer-backup.*`.
+- [x] Monitoring/alerting for ingest failures, stale worker heartbeat, and disk usage:
+  `scripts/healthcheck.sh` with an optional webhook, run by
+  `deploy/systemd/transducer-healthcheck.*`.
+- [x] Runbook: start/stop, restore, rotate passwords and tokens, add a new site/logger:
+  [operations.md](operations.md).
+- [x] Manual upload cadence documented for the operator:
+  [operations.md](operations.md#7-upload-cadence).
 
 **Exit criteria**
 
-- Backup restore tested after go-live.
-- Worker heartbeat and failed-job alerts verified.
-- Runbook reviewed by the operator.
-- Certificate rotation rehearsed.
+- [ ] Backup restore tested after go-live.
+- [ ] Worker heartbeat and failed-job alerts verified.
+- [ ] Runbook reviewed by the operator.
+- [ ] Certificate rotation rehearsed.
+
+The scripts and units are implemented; the exit criteria require the production
+VM. See the Phase 7 checklist in [operations.md](operations.md#9-phase-7-checklist).
 
 ## Phase 8 — Dashboard v1 (superseded by Phase 9)
 
@@ -211,7 +219,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
   verification step are removed. The image stays Python-only.
 - [x] State version 2: shared scenes, each a collection of gridded figures. A version 1
-  `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
+  `state.json` is archived as `state.v1.json` and replaced with an empty v2 document;
+  the abandoned intermediate v2 draft (`shared`/`personal`) is archived as
+  `state.v2-legacy.json`.
 - [x] Scene domain operations: create and delete scenes; per-user selected scene and tray
   state.
 - [x] Collapsible scene tray listing all shared scenes, with create and confirmed delete.

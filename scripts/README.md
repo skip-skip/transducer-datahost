@@ -5,13 +5,71 @@
 | `upload_xle.ps1` | Manually upload new `.xle` files to the ingest API | Windows upload host |
 | `run_ingest.ps1` | Legacy direct loader with locking and daily logging | Windows host with DB access |
 | `migrate.py` | Apply `db/migrations` and update application roles | VM (or any host with admin access) |
-| `backup.sh` | Nightly `pg_dump --format=custom` to a network share | Linux VM |
-| `restore.sh` | Restore a dump into a scratch or production database | Linux VM |
-| `healthcheck.sh` | Verify DB/API reachability and latest ingest age | Linux VM |
+| `backup.sh` | Nightly `pg_dump --format=custom` plus dashboard state | Linux VM |
+| `restore.sh` | Restore a dump into a scratch or production database, or restore dashboard state | Linux VM |
+| `healthcheck.sh` | Verify containers, APIs, heartbeat, jobs, disk, and certificate; optional webhook alert | Linux VM |
+| `_common.sh` | Shared helpers sourced by the shell scripts | — |
 
-`upload_xle.ps1` and `migrate.py` are implemented. `run_ingest.ps1` remains for
-a direct database connection during development. The shell scripts are still
-planned.
+All scripts are implemented. The shell scripts are driven by
+[`deploy/systemd`](../deploy/systemd) timers and documented in
+[docs/operations.md](../docs/operations.md). They read `.env` in the repository
+root and accept the same values from the environment, so systemd can override
+them through `/etc/transducer/ops.env`.
+
+## `backup.sh`
+
+```bash
+scripts/backup.sh
+```
+
+Writes a custom-format `pg_dump`, a tar archive of the `dashboard_state`
+volume, and a JSON manifest to `BACKUP_DIR` (default `/var/backups/transducer`).
+The dump is verified with `pg_restore --list` before it is promoted. Retention
+defaults to 30 daily runs and 12 monthly copies; `BACKUP_REMOTE` rsyncs the
+directory to a network share. A `flock` prevents overlapping runs.
+
+Not included: database roles (run the `migrate` service), `.env`, TLS material,
+and the spool volume. Drain queued jobs before a backup if a restore must finish
+them. See [docs/operations.md](../docs/operations.md#3-backups).
+
+## `restore.sh`
+
+```bash
+scripts/restore.sh --list BACKUP.dump
+scripts/restore.sh --database BACKUP.dump
+scripts/restore.sh --database BACKUP.dump --production --force
+scripts/restore.sh --dashboard-state BACKUP.tar.gz --force
+```
+
+- `--list` prints the archive table of contents.
+- `--database` restores into a scratch database (`transducer_restore` by
+  default) and prints `import_file` and `reading` counts. It never touches
+  production unless `--target` is `POSTGRES_DB` and both `--production` and
+  `--force` are supplied.
+- A production restore stops the API, worker, read API, and dashboard, restores
+  in a single transaction, and starts them again.
+- `--dashboard-state` replaces the state volume, restores ownership to uid
+  10001, and restarts the dashboard.
+
+Roles are not part of a `pg_dump`; run `docker compose run --rm migrate` on a
+fresh cluster before restoring. See
+[docs/operations.md](../docs/operations.md#4-restore).
+
+## `healthcheck.sh`
+
+```bash
+scripts/healthcheck.sh
+```
+
+Checks container health, the ingest/read/dashboard `/health` endpoints, worker
+heartbeat age, failed jobs in the last 24 hours, queue backlog, latest ingest
+age, disk usage, and certificate expiry. Exit 0 means no failures (warnings are
+allowed); exit 1 means at least one failure.
+
+Set `ALERT_WEBHOOK_URL` to a Slack-compatible webhook to receive alerts.
+`ALERT_ON_WARNINGS=true` includes warnings. Identical alerts are suppressed for
+`ALERT_REPEAT_SECONDS` (default 3600). See
+[docs/operations.md](../docs/operations.md#5-monitoring-and-alerting).
 
 ## `upload_xle.ps1`
 
@@ -65,8 +123,8 @@ admin `POSTGRES_*` variables plus `UPLOAD_PASSWORD`, `INGEST_PASSWORD`, and
   code.
 
 The wrapper inherits its environment from the calling shell. Set the canonical
-`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `INGEST_USER`, and `INGEST_PASSWORD`
-variables (plus optional `SITE_TIMEZONE`) before running it.
+`POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `INGEST_USER`, and
+`INGEST_PASSWORD` variables (plus optional `SITE_TIMEZONE`) before running it.
 
 > The VM-hosted design does **not** use `run_ingest.ps1`; uploads go through
 > `upload_xle.ps1` and the HTTPS API. Keep the direct loader for development
