@@ -273,8 +273,8 @@ the right-hand settings tray simple and avoids template resource dependencies.
 1. The browser computes the clicked cell with GridStack's
    `getCellFromPixel({left, top}, true)`.
 2. If the cell is inside an existing item, the event is ignored.
-3. The cell is written to a hidden Panel `TextInput` and an `input` event is
-   dispatched so the value syncs to Python.
+3. The cell is written to a `cell_click` string parameter on the grid and synced
+   to Python.
 4. A Python watcher creates a minimum-size figure at that cell.
 5. If the minimum-size figure does not fit, the watcher finds the first free
    slot. If the scene is full, it shows a notification instead of creating a

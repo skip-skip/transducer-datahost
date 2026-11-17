@@ -22,6 +22,10 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
 
+In the browser, click an empty grid cell to add a figure, click its title ribbon
+to select it and open the settings tray, and drag the ribbon to move it. Layout
+changes are saved immediately to the shared state.
+
 Writes take a process-wide lock plus a file lock, fsync a temporary file, copy
 the previous version to `state.json.bak`, and atomically replace `state.json`.
 The container runs one uvicorn worker.

@@ -215,9 +215,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Scene domain operations: create and delete scenes; per-user selected scene and tray
   state.
 - [x] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
-- [ ] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
+- [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
   Clicking an empty cell creates a minimum-size figure there.
-- [ ] Figure title ribbon: click selects and highlights the figure and opens the settings
+- [x] Figure title ribbon: click selects and highlights the figure and opens the settings
   tray; drag moves the figure. Layout persists across reloads and restarts.
 - [ ] Settings tray: title, location (including "All locations"), analyte, range
   (24h/7d/30d), save, and confirmed delete.
@@ -226,7 +226,7 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [x] Tests for state v2, scene/figure operations, and the Panel mount.
-- [x] Tests for the Panel scene-shell callbacks.
+- [x] Tests for the Panel scene-shell and grid callbacks.
 - [ ] Tests for the chart builder.
 
 **Exit criteria**

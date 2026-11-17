@@ -12,6 +12,8 @@ from .settings import DashboardSettings
 from .state import StateStore
 from .workspace import DashboardShell
 
+pn.extension("gridstack")
+
 
 def _sign_in_view() -> pn.Column:
     return pn.Column(

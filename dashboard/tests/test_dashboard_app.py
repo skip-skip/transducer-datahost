@@ -129,12 +129,15 @@ def test_logout_clears_the_cookie(client: TestClient) -> None:
 
 
 def test_root_serves_the_panel_shell(client: TestClient) -> None:
+    login(client)
     response = client.get("/")
 
     assert response.status_code == 200
     assert "<title>Transducer dashboard</title>" in response.text
     assert "static/js/bokeh.min.js" in response.text
     assert "static/extensions/panel/panel.min.js" in response.text
+    assert "static/extensions/panel/bundled/gridstack/" in response.text
+    assert "gridstack-all.js" in response.text
     assert "cdn.jsdelivr" not in response.text
     assert "unpkg.com" not in response.text
 

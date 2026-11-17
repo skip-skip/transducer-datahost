@@ -1,9 +1,11 @@
+import json
+
 import pytest
 
 from transducer_dashboard import scenes
 from transducer_dashboard.auth import Session
 from transducer_dashboard.settings import DashboardSettings
-from transducer_dashboard.state import StateStore
+from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
 from transducer_dashboard.workspace import DashboardShell
 
 
@@ -53,7 +55,9 @@ def test_create_scene_selects_and_persists_it(tmp_path) -> None:
     assert shell.scene_buttons[scene["id"]].button_type == "primary"
     assert scene["name"] in shell.scene_title.object
     assert "0 figures" in shell.scene_summary.object
-    assert "No figures yet" in shell.canvas_body.object
+    assert "Click an empty cell" in shell.scene_summary.object
+    assert shell.grid is not None
+    assert shell.figure_cards == {}
 
     stored = store.load()
     assert stored["scenes"][0]["id"] == scene["id"]
@@ -292,3 +296,242 @@ def test_actions_use_the_session_label(tmp_path, label: str) -> None:
     shell.create_scene()
 
     assert store.load()["ui"][label]["selected_scene_id"] is not None
+
+
+def grid_items(shell, layouts):
+    return [
+        {
+            "id": str(id(shell.figure_cards[figure_id])),
+            "x0": layout["x"],
+            "y0": layout["y"],
+            "x1": layout["x"] + layout["w"],
+            "y1": layout["y"] + layout["h"],
+        }
+        for figure_id, layout in layouts.items()
+    ]
+
+
+def figure_layouts(store):
+    return {
+        figure["id"]: figure["layout"]
+        for figure in store.load()["scenes"][0]["figures"]
+    }
+
+
+def test_a_selected_scene_shows_an_empty_grid(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    shell.create_scene()
+
+    assert shell.grid is not None
+    assert shell.grid.ncols == GRID_COLUMNS
+    assert shell.grid.nrows == 6
+    assert shell.grid.sizing_mode == "stretch_both"
+    assert shell.canvas_body.height == 6 * GRID_ROW_HEIGHT
+    assert shell.figure_cards == {}
+
+
+def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    scene = shell.create_scene()
+    assert scene is not None
+
+    figure = shell.create_figure(4, 3)
+
+    assert figure is not None
+    assert figure["layout"] == {"x": 4, "y": 3, "w": 3, "h": 2}
+    assert shell.selected_figure_id == figure["id"]
+    assert "figure-selected" in shell.figure_cards[figure["id"]].css_classes
+    assert "1 figure" in shell.scene_summary.object
+
+    stored = store.load()
+    assert stored["scenes"][0]["figures"][0]["layout"] == {
+        "x": 4,
+        "y": 3,
+        "w": 3,
+        "h": 2,
+    }
+    assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
+
+
+def test_the_grid_cell_click_bridge_creates_a_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+
+    assert shell.grid is not None
+    shell.grid.cell_click = json.dumps({"x": 6, "y": 2, "n": 1})
+
+    stored = store.load()
+    figures = stored["scenes"][0]["figures"]
+    assert len(figures) == 1
+    assert figures[0]["layout"] == {"x": 6, "y": 2, "w": 3, "h": 2}
+    assert shell.selected_figure_id == figures[0]["id"]
+
+
+def test_a_figure_falls_back_to_the_first_free_slot(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+
+    first = shell.create_figure(4, 3)
+    second = shell.create_figure(4, 3)
+
+    assert first is not None
+    assert second is not None
+    assert first["layout"] == {"x": 4, "y": 3, "w": 3, "h": 2}
+    assert second["layout"] == {"x": 0, "y": 0, "w": 3, "h": 2}
+
+
+def test_a_full_scene_reports_instead_of_overlapping(tmp_path, monkeypatch) -> None:
+    shell, _ = make_shell(tmp_path)
+    scene = shell.create_scene()
+    assert scene is not None
+    shell.create_figure(0, 0)
+
+    monkeypatch.setattr(scenes, "find_free_slot", lambda *args, **kwargs: None)
+    figure = shell.create_figure(0, 0)
+
+    assert figure is None
+    assert shell.selected_scene_id == scene["id"]
+    assert shell.status_pane.visible is True
+    assert "no room for another figure" in shell.status_pane.object
+    assert len(shell.figure_cards) == 1
+
+
+def test_the_ribbon_selects_the_figure_and_updates_the_settings_tray(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    assert shell.selected_figure_id == second["id"]
+
+    shell.figure_cards[first["id"]].ribbon.clicks += 1
+
+    assert shell.selected_figure_id == first["id"]
+    assert "figure-selected" in shell.figure_cards[first["id"]].css_classes
+    assert "figure-selected" not in shell.figure_cards[second["id"]].css_classes
+    assert first["title"] in shell.settings_body.objects[0].object
+
+
+def test_figure_selection_persists_per_user(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path, label="alice")
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+
+    shell.select_figure(first["id"])
+
+    reloaded, _ = make_shell(tmp_path, label="alice")
+    assert reloaded.selected_figure_id == first["id"]
+    assert "figure-selected" in reloaded.figure_cards[first["id"]].css_classes
+    assert first["title"] in reloaded.settings_body.objects[0].object
+
+    bob, _ = make_shell(tmp_path, label="bob")
+    assert bob.selected_figure_id is None
+
+
+def test_dragging_a_figure_persists_the_layout(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+
+    shell.apply_grid_state(
+        grid_items(
+            shell,
+            {
+                first["id"]: {"x": 0, "y": 4, "w": 3, "h": 2},
+                second["id"]: {"x": 6, "y": 0, "w": 3, "h": 2},
+            },
+        )
+    )
+
+    layouts = figure_layouts(store)
+    assert layouts[first["id"]] == {"x": 0, "y": 4, "w": 3, "h": 2}
+    assert layouts[second["id"]] == {"x": 6, "y": 0, "w": 3, "h": 2}
+    assert shell.status_pane.visible is True
+    assert "Saved" in shell.status_pane.object
+
+    reloaded, _ = make_shell(tmp_path)
+    assert reloaded.grid is not None
+    assert (4, 0, 6, 3) in reloaded.grid.objects
+    assert (0, 6, 2, 9) in reloaded.grid.objects
+
+
+def test_resizing_a_figure_persists_the_layout(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.apply_grid_state(
+        grid_items(shell, {figure["id"]: {"x": 0, "y": 0, "w": 6, "h": 4}})
+    )
+
+    assert figure_layouts(store)[figure["id"]] == {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 4,
+    }
+
+
+def test_an_identical_grid_state_is_not_rewritten(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+    before = store.path.read_text(encoding="utf-8")
+
+    shell.apply_grid_state(
+        grid_items(shell, {figure["id"]: {"x": 0, "y": 0, "w": 3, "h": 2}})
+    )
+
+    assert store.path.read_text(encoding="utf-8") == before
+    assert shell.status_pane.visible is False
+
+
+def test_an_overlapping_layout_is_rejected(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    before = figure_layouts(store)
+
+    shell.apply_grid_state(
+        grid_items(
+            shell,
+            {
+                first["id"]: {"x": 3, "y": 0, "w": 3, "h": 2},
+                second["id"]: {"x": 3, "y": 0, "w": 3, "h": 2},
+            },
+        )
+    )
+
+    assert shell.status_pane.visible is True
+    assert "overlap" in shell.status_pane.object
+    assert figure_layouts(store) == before
+
+
+def test_switching_scenes_rebuilds_the_grid(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    first_scene = shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert first_scene is not None
+    assert figure is not None
+
+    shell.create_scene()
+
+    assert shell.figure_cards == {}
+
+    shell.select_scene(first_scene["id"])
+
+    assert figure["id"] in shell.figure_cards
+    assert shell.selected_figure_id is None
