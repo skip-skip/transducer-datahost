@@ -26,6 +26,11 @@ In the browser, click an empty grid cell to add a figure, click its title ribbon
 to select it and open the settings tray, and drag the ribbon to move it. Layout
 changes are saved immediately to the shared state.
 
+The settings tray edits the title, location, analyte, and range (`24h`, `7d`,
+`30d`). Saving verifies the analyte against the read API: an unknown series is
+rejected, and a series with no readings at the chosen location is rejected.
+Deleting a figure takes two clicks (delete, then confirm).
+
 Writes take a process-wide lock plus a file lock, fsync a temporary file, copy
 the previous version to `state.json.bak`, and atomically replace `state.json`.
 The container runs one uvicorn worker.

@@ -4,14 +4,64 @@ import pytest
 
 from transducer_dashboard import scenes
 from transducer_dashboard.auth import Session
+from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
 from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
 from transducer_dashboard.workspace import DashboardShell
+
+LOCATIONS = [
+    {"location_id": 1, "name": "MCMW-04"},
+    {"location_id": 2, "name": "MCDMW-04"},
+]
+SERIES = [
+    {
+        "series_id": 10,
+        "serial_number": "1096043",
+        "channel_no": 1,
+        "identification": "LEVEL",
+        "unit": "ft",
+        "data_kind": "level",
+    },
+    {
+        "series_id": 11,
+        "serial_number": "1096043",
+        "channel_no": 2,
+        "identification": "TEMPERATURE",
+        "unit": "C",
+        "data_kind": "temperature",
+    },
+    {
+        "series_id": 12,
+        "serial_number": "1096044",
+        "channel_no": 1,
+        "identification": "LEVEL",
+        "unit": "ft",
+        "data_kind": "level",
+    },
+]
+SERIES_BY_LOCATION = {1: SERIES[:2], 2: SERIES[2:]}
 
 
 class FakeReadClient:
     def whoami(self, token: str) -> str:
         return "alice"
+
+    def locations(self, token: str) -> list[dict]:
+        return list(LOCATIONS)
+
+    def series(self, token: str, *, serial=None, limit: int = 1000) -> list[dict]:
+        return list(SERIES)
+
+    def series_at_location(
+        self, token: str, location_id: int, *, limit: int = 1000
+    ) -> list[dict]:
+        return list(SERIES_BY_LOCATION.get(location_id, []))
+
+    def series_detail(self, token: str, series_id: int) -> dict:
+        for row in SERIES:
+            if row["series_id"] == series_id:
+                return dict(row)
+        raise ReadApiError(404, "series not found")
 
 
 def make_shell(
@@ -411,7 +461,7 @@ def test_the_ribbon_selects_the_figure_and_updates_the_settings_tray(tmp_path) -
     assert shell.selected_figure_id == first["id"]
     assert "figure-selected" in shell.figure_cards[first["id"]].css_classes
     assert "figure-selected" not in shell.figure_cards[second["id"]].css_classes
-    assert first["title"] in shell.settings_body.objects[0].object
+    assert first["title"] in shell.settings_title.value
 
 
 def test_figure_selection_persists_per_user(tmp_path) -> None:
@@ -427,7 +477,7 @@ def test_figure_selection_persists_per_user(tmp_path) -> None:
     reloaded, _ = make_shell(tmp_path, label="alice")
     assert reloaded.selected_figure_id == first["id"]
     assert "figure-selected" in reloaded.figure_cards[first["id"]].css_classes
-    assert first["title"] in reloaded.settings_body.objects[0].object
+    assert first["title"] in reloaded.settings_title.value
 
     bob, _ = make_shell(tmp_path, label="bob")
     assert bob.selected_figure_id is None
@@ -535,3 +585,167 @@ def test_switching_scenes_rebuilds_the_grid(tmp_path) -> None:
 
     assert figure["id"] in shell.figure_cards
     assert shell.selected_figure_id is None
+
+
+def option_values(select) -> list:
+    return [value for _, value in select.options]
+
+
+def test_the_settings_tray_shows_the_selected_figure(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    assert shell.settings_title is not None
+    assert shell.settings_title.value == figure["title"]
+    assert shell.settings_location is not None
+    assert shell.settings_location.options[0] == ("All locations", "")
+    assert ("MCMW-04", "1") in shell.settings_location.options
+    assert shell.settings_location.value == ""
+    assert shell.settings_analyte is not None
+    assert shell.settings_analyte.value == ""
+    assert option_values(shell.settings_analyte) == ["", "10", "11", "12"]
+    assert "LEVEL · 1096043 · ch1 · [ft]" in [
+        label for label, _ in shell.settings_analyte.options
+    ]
+    assert shell.settings_range is not None
+    assert shell.settings_range.value == "7d"
+    assert shell.settings_save is not None
+    assert shell.settings_delete is not None
+    assert shell.settings_message is not None
+    assert "Choose a location and analyte" in shell.settings_message.object
+
+
+def test_saving_the_settings_updates_the_figure_and_the_ribbon(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_title.value = "Well level"
+    shell.settings_location.value = "1"
+    shell.settings_analyte.value = "10"
+    shell.settings_range.value = "24h"
+    shell.settings_save.clicks += 1
+
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == "Well level"
+    assert stored["location_id"] == 1
+    assert stored["series_id"] == 10
+    assert stored["range"] == "24h"
+    assert shell.figure_cards[figure["id"]].ribbon.label == "Well level"
+    assert shell.status_pane.visible is True
+    assert "Saved" in shell.status_pane.object
+
+
+def test_saving_requires_an_analyte(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_title.value = "Named but empty"
+    shell.settings_save.clicks += 1
+
+    assert shell.settings_message.visible is True
+    assert "Choose an analyte" in shell.settings_message.object
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == figure["title"]
+    assert stored["series_id"] is None
+
+
+def test_saving_rejects_a_blank_title(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_title.value = "   "
+    shell.settings_analyte.value = "10"
+    shell.settings_save.clicks += 1
+
+    assert "Title must not be blank" in shell.settings_message.object
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == figure["title"]
+
+
+def test_saving_rejects_an_analyte_without_readings_at_the_location(
+    tmp_path, monkeypatch
+) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_location.value = "1"
+    shell.settings_analyte.value = "10"
+    monkeypatch.setattr(
+        shell.client, "series_at_location", lambda *args, **kwargs: []
+    )
+    shell.settings_save.clicks += 1
+
+    assert "no readings at this location" in shell.settings_message.object
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["series_id"] is None
+
+
+def test_changing_the_location_refreshes_the_analyte_options(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+
+    shell.settings_location.value = "1"
+    assert option_values(shell.settings_analyte) == ["", "10", "11"]
+    shell.settings_analyte.value = "10"
+
+    shell.settings_location.value = "2"
+
+    assert option_values(shell.settings_analyte) == ["", "12"]
+    assert shell.settings_analyte.value == ""
+
+
+def test_deleting_a_figure_requires_confirmation(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_delete.clicks += 1
+
+    assert shell.settings_delete is None
+    assert shell.settings_confirm_delete is not None
+    assert shell.settings_cancel_delete is not None
+    assert len(store.load()["scenes"][0]["figures"]) == 1
+
+    shell.settings_cancel_delete.clicks += 1
+
+    assert shell.settings_delete is not None
+    assert shell.settings_confirm_delete is None
+    assert len(store.load()["scenes"][0]["figures"]) == 1
+
+    shell.settings_delete.clicks += 1
+    shell.settings_confirm_delete.clicks += 1
+
+    assert store.load()["scenes"][0]["figures"] == []
+    assert shell.selected_figure_id is None
+    assert shell.settings_title is None
+    assert "Select a figure" in shell.settings_body.objects[0].object
+
+
+def test_a_failed_location_load_is_reported_in_the_tray(
+    tmp_path, monkeypatch
+) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+
+    def fail(token: str):
+        raise ReadApiError(502, "read API is unreachable")
+
+    monkeypatch.setattr(shell.client, "locations", fail)
+    shell.create_figure(0, 0)
+
+    assert shell.settings_location is not None
+    assert shell.settings_location.options == [("All locations", "")]
+    assert shell.settings_message.visible is True
+    assert "Could not load locations" in shell.settings_message.object

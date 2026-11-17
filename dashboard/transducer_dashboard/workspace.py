@@ -15,9 +15,15 @@ import panel as pn
 from . import scenes
 from .auth import Session
 from .grid import GRID_CSS, FigureCard, SceneGrid, grid_height, grid_rows
-from .read_client import ReadClient
+from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings
-from .state import GRID_COLUMNS, StateError, StateStore
+from .state import (
+    DEFAULT_RANGE,
+    GRID_COLUMNS,
+    RANGES,
+    StateError,
+    StateStore,
+)
 
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; min-height: 100vh; }
@@ -71,6 +77,17 @@ class DashboardShell:
         self._grid_figure_ids: dict[str, str] = {}
         self.settings_body: pn.Column | None = None
         self.canvas_body: Any = None
+        self.settings_title: pn.widgets.TextInput | None = None
+        self.settings_location: pn.widgets.Select | None = None
+        self.settings_analyte: pn.widgets.Select | None = None
+        self.settings_range: pn.widgets.RadioButtonGroup | None = None
+        self.settings_message: pn.pane.HTML | None = None
+        self.settings_save: pn.widgets.Button | None = None
+        self.settings_delete: pn.widgets.Button | None = None
+        self.settings_confirm_delete: pn.widgets.Button | None = None
+        self.settings_cancel_delete: pn.widgets.Button | None = None
+        self._figure_delete_confirm_id: str | None = None
+        self._locations_cache: list[dict[str, Any]] | None = None
         self._view = pn.Column(
             sizing_mode="stretch_width",
             css_classes=["td-shell"],
@@ -672,26 +689,319 @@ class DashboardShell:
     def _settings_objects(self) -> list[Any]:
         figure = self._selected_figure()
         if figure is None:
+            self.settings_title = None
+            self.settings_location = None
+            self.settings_analyte = None
+            self.settings_range = None
+            self.settings_message = None
+            self.settings_save = None
+            self.settings_delete = None
+            self.settings_confirm_delete = None
+            self.settings_cancel_delete = None
             return [
                 pn.pane.HTML('<p class="td-muted">Select a figure to edit it.</p>')
             ]
 
-        if figure["location_id"] is None:
-            location = "All locations"
+        message = pn.pane.HTML("", visible=False, sizing_mode="stretch_width")
+        self.settings_message = message
+
+        title = pn.widgets.TextInput(
+            label="Title",
+            value=figure["title"],
+            sizing_mode="stretch_width",
+        )
+        self.settings_title = title
+
+        location_options: list[tuple[str, str]] = [("All locations", "")]
+        location_error = ""
+        try:
+            for row in self._load_locations():
+                location_id = row.get("location_id")
+                if not isinstance(location_id, int) or isinstance(location_id, bool):
+                    continue
+                label = str(row.get("name") or f"Location {location_id}")
+                location_options.append((label, str(location_id)))
+        except ReadApiError as exc:
+            location_error = f"Could not load locations: {exc.detail}"
+
+        location_values = [value for _, value in location_options]
+        location_value = (
+            "" if figure["location_id"] is None else str(figure["location_id"])
+        )
+        if location_value not in location_values:
+            location_value = ""
+        location = pn.widgets.Select(
+            label="Location",
+            options=location_options,
+            value=location_value,
+            sizing_mode="stretch_width",
+        )
+        self.settings_location = location
+        location.param.watch(self._on_settings_location_change, "value")
+
+        analyte_options: list[tuple[str, str]] = [("Choose an analyte", "")]
+        analyte_error = ""
+        try:
+            for row in self._load_series(self._selected_id(location_value)):
+                series_id = row.get("series_id")
+                if not isinstance(series_id, int) or isinstance(series_id, bool):
+                    continue
+                analyte_options.append((self._series_label(row), str(series_id)))
+        except ReadApiError as exc:
+            analyte_error = f"Could not load analytes: {exc.detail}"
+
+        analyte_values = [value for _, value in analyte_options]
+        series_value = "" if figure["series_id"] is None else str(figure["series_id"])
+        if series_value not in analyte_values:
+            series_value = ""
+        analyte = pn.widgets.Select(
+            label="Analyte",
+            options=analyte_options,
+            value=series_value,
+            sizing_mode="stretch_width",
+        )
+        self.settings_analyte = analyte
+
+        range_value = figure["range"] if figure["range"] in RANGES else DEFAULT_RANGE
+        range_group = pn.widgets.RadioButtonGroup(
+            label="Range",
+            options=list(RANGES),
+            value=range_value,
+            sizing_mode="stretch_width",
+        )
+        self.settings_range = range_group
+
+        save = pn.widgets.Button(
+            label="Save",
+            color="primary",
+            sizing_mode="stretch_width",
+        )
+        save.on_click(self._on_save_figure)
+        self.settings_save = save
+        self.settings_delete = None
+        self.settings_confirm_delete = None
+        self.settings_cancel_delete = None
+
+        delete_controls: list[Any]
+        if self._figure_delete_confirm_id == figure["id"]:
+            confirm = pn.widgets.Button(
+                label="Confirm delete",
+                color="danger",
+                sizing_mode="stretch_width",
+            )
+            cancel = pn.widgets.Button(
+                label="Cancel",
+                color="light",
+                sizing_mode="stretch_width",
+            )
+            confirm.on_click(self._on_confirm_delete_figure)
+            cancel.on_click(self._on_cancel_delete_figure)
+            self.settings_confirm_delete = confirm
+            self.settings_cancel_delete = cancel
+            delete_controls = [
+                pn.pane.HTML('<p class="td-muted">Delete this figure?</p>'),
+                confirm,
+                cancel,
+            ]
         else:
-            location = f"Location {figure['location_id']}"
-        if figure["series_id"] is None:
-            analyte = "Not chosen"
-        else:
-            analyte = f"Series {figure['series_id']}"
+            delete = pn.widgets.Button(
+                label="Delete figure",
+                color="danger",
+                sizing_mode="stretch_width",
+            )
+            delete.on_click(self._on_request_delete_figure)
+            self.settings_delete = delete
+            delete_controls = [delete]
+
+        if location_error:
+            self._set_settings_message(location_error, error=True)
+        elif analyte_error:
+            self._set_settings_message(analyte_error, error=True)
+        elif len(analyte_options) == 1:
+            self._set_settings_message("No analytes are available for this selection.")
+        elif figure["series_id"] is None:
+            self._set_settings_message("Choose a location and analyte.")
 
         return [
-            pn.pane.HTML(f"<strong>{html.escape(figure['title'])}</strong>"),
-            pn.pane.HTML(
-                '<p class="td-muted">'
-                f"Location: {html.escape(location)}<br>"
-                f"Analyte: {html.escape(analyte)}<br>"
-                f"Range: {html.escape(figure['range'])}"
-                "</p>"
-            ),
+            title,
+            location,
+            analyte,
+            range_group,
+            save,
+            *delete_controls,
+            message,
         ]
+
+    def _load_locations(self) -> list[dict[str, Any]]:
+        if self._locations_cache is None:
+            self._locations_cache = self.client.locations(self.session.token)
+        return self._locations_cache
+
+    def _load_series(self, location_id: int | None) -> list[dict[str, Any]]:
+        if location_id is None:
+            return self.client.series(self.session.token)
+        return self.client.series_at_location(self.session.token, location_id)
+
+    @staticmethod
+    def _series_label(row: dict[str, Any]) -> str:
+        parts = [str(row.get("identification") or "Series")]
+        serial = row.get("serial_number")
+        if serial:
+            parts.append(str(serial))
+        channel = row.get("channel_no")
+        if channel:
+            parts.append(f"ch{channel}")
+        unit = row.get("unit")
+        if unit:
+            parts.append(f"[{unit}]")
+        return " · ".join(parts)
+
+    @staticmethod
+    def _selected_id(value: Any) -> int | None:
+        if value is None or value == "":
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _set_settings_message(self, message: str, *, error: bool = False) -> None:
+        pane = self.settings_message
+        if pane is None:
+            return
+        if not message:
+            pane.object = ""
+            pane.visible = False
+            return
+        css = "td-status td-status-error" if error else "td-muted"
+        pane.object = f'<p class="{css}">{html.escape(message)}</p>'
+        pane.visible = True
+
+    def _on_settings_location_change(self, event: Any) -> None:
+        analyte = self.settings_analyte
+        if analyte is None:
+            return
+        current = analyte.value
+        location_id = self._selected_id(event.new)
+        try:
+            rows = self._load_series(location_id)
+        except ReadApiError as exc:
+            analyte.options = [("Choose an analyte", "")]
+            analyte.value = ""
+            self._set_settings_message(
+                f"Could not load analytes: {exc.detail}", error=True
+            )
+            return
+
+        options: list[tuple[str, str]] = [("Choose an analyte", "")]
+        for row in rows:
+            series_id = row.get("series_id")
+            if isinstance(series_id, int) and not isinstance(series_id, bool):
+                options.append((self._series_label(row), str(series_id)))
+        analyte.options = options
+        analyte.value = current if current in [value for _, value in options] else ""
+        if len(options) == 1:
+            self._set_settings_message("No analytes are available for this location.")
+        else:
+            self._set_settings_message("")
+
+    def _on_save_figure(self, event: Any = None) -> None:
+        scene_id = self._selected_scene_id
+        figure_id = self._selected_figure_id
+        if scene_id is None or figure_id is None:
+            return
+
+        title = (self.settings_title.value if self.settings_title else "") or ""
+        title = title.strip()
+        location_id = self._selected_id(
+            self.settings_location.value if self.settings_location else None
+        )
+        series_id = self._selected_id(
+            self.settings_analyte.value if self.settings_analyte else None
+        )
+        range_value = self.settings_range.value if self.settings_range else DEFAULT_RANGE
+
+        if not title:
+            self._set_settings_message("Title must not be blank.", error=True)
+            return
+        if series_id is None:
+            self._set_settings_message("Choose an analyte.", error=True)
+            return
+        if range_value not in RANGES:
+            self._set_settings_message("Choose a range.", error=True)
+            return
+
+        error = self._validate_figure_selection(location_id, series_id)
+        if error is not None:
+            self._set_settings_message(error, error=True)
+            return
+
+        def operation(data: dict[str, Any]) -> dict[str, Any]:
+            return scenes.update_figure(
+                data,
+                scene_id,
+                figure_id,
+                title=title,
+                location_id=location_id,
+                series_id=series_id,
+                range=range_value,
+            )
+
+        try:
+            self._state, figure = self.store.mutate(operation)
+        except (scenes.SceneError, StateError) as exc:
+            self._recover(str(exc))
+            return
+
+        card = self._figure_cards.get(figure_id)
+        if card is not None:
+            card.set_title(figure["title"])
+        self._figure_delete_confirm_id = None
+        self._set_status("Saved")
+        self._fill_settings()
+
+    def _validate_figure_selection(
+        self, location_id: int | None, series_id: int
+    ) -> str | None:
+        try:
+            if location_id is None:
+                self.client.series_detail(self.session.token, series_id)
+            else:
+                rows = self.client.series_at_location(self.session.token, location_id)
+                if series_id not in {row.get("series_id") for row in rows}:
+                    return "That analyte has no readings at this location."
+        except ReadApiError as exc:
+            return f"Could not verify the selection: {exc.detail}"
+        return None
+
+    def _on_request_delete_figure(self, event: Any = None) -> None:
+        if self._selected_figure_id is None:
+            return
+        self._figure_delete_confirm_id = self._selected_figure_id
+        self._fill_settings()
+
+    def _on_cancel_delete_figure(self, event: Any = None) -> None:
+        self._figure_delete_confirm_id = None
+        self._fill_settings()
+
+    def _on_confirm_delete_figure(self, event: Any = None) -> None:
+        self.delete_selected_figure()
+
+    def delete_selected_figure(self) -> None:
+        scene_id = self._selected_scene_id
+        figure_id = self._selected_figure_id
+        if scene_id is None or figure_id is None:
+            return
+
+        try:
+            self._state, _ = self.store.mutate(
+                lambda data: scenes.delete_figure(data, scene_id, figure_id)
+            )
+        except (scenes.SceneError, StateError) as exc:
+            self._recover(str(exc))
+            return
+
+        self._selected_figure_id = None
+        self._figure_delete_confirm_id = None
+        self._clear_status()
+        self.refresh()
