@@ -206,9 +206,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 
 **Deliverables**
 
-- [ ] `panel>=1.5` dependency; the Panel app is mounted in FastAPI with
+- [x] `panel>=1.5` dependency; the Panel app is mounted in FastAPI with
   `panel.io.fastapi.add_applications`.
-- [ ] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
+- [x] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
   verification step are removed. The image stays Python-only.
 - [ ] State version 2: shared scenes, each a collection of gridded figures. A version 1
   `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
@@ -223,7 +223,7 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   (24h/7d/30d), save, and confirmed delete.
 - [ ] Bokeh time-series charts for every figure in the selected scene, with loading and
   inline error states.
-- [ ] Panel cookie validation against the existing signed session cookie, the minimum
+- [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [ ] Tests for state v2, scene/figure operations, the Panel mount, callbacks, and the
   chart builder.

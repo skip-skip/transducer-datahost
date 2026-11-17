@@ -64,8 +64,25 @@ FastAPI service
 - The dashboard still has no database credentials and no write route on the read
   API.
 - Panel **>= 1.5** is required for `panel.io.fastapi.add_applications`. The
-  current development environment has Panel 1.4.4 and must be upgraded before the
-  mount can be exercised.
+  development environment was upgraded from 1.4.4 and the mount is verified with
+  Panel 1.10 and Bokeh 3.10.
+
+### Mount verification
+
+The mount-stage placeholder confirmed the integration assumptions:
+
+- FastAPI `/login`, `/logout`, and `/health` routes take precedence over the
+  Panel application mounted at `/`.
+- `pn.state.cookies` exposes the existing signed session cookie to the Panel
+  application.
+- Security headers wrap Panel responses because the header middleware is added
+  after `add_applications`.
+- Panel serves its Bokeh and extension JavaScript locally; the page contains no
+  CDN references.
+- `--root-path /dashboard` preserves the login redirect and cookie path, and the
+  relative Panel asset URLs resolve under the prefix.
+- The page renders under a policy without `unsafe-eval`: inline scripts and
+  styles plus `ws:`/`wss:` connections are the required additions.
 
 ## 3. Authentication and session flow
 
@@ -89,20 +106,24 @@ because the app refuses to load data without a session.
 
 ### Content Security Policy
 
-Panel and Bokeh require a wider policy than the current `script-src 'self'`.
-The exact minimum will be established during the mount spike. The expected
-shape is:
+Panel and Bokeh require a wider policy than the previous `script-src 'self'`.
+The mount-stage policy is:
 
+- `default-src 'self'`
 - `script-src 'self' 'unsafe-inline'`
 - `style-src 'self' 'unsafe-inline'`
-- `connect-src 'self' ws: wss:`
 - `img-src 'self' data:`
 - `font-src 'self' data:`
+- `connect-src 'self' ws: wss:`
+- `worker-src 'self' blob:`
 - `frame-ancestors 'none'`
+- `base-uri 'self'`
+- `form-action 'self'`
 
 `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
-`Referrer-Policy: same-origin` stay. If Bokeh requires `unsafe-eval`, that is a
-security regression and must be called out in ADR-028 before it is accepted.
+`Referrer-Policy: same-origin` stay. The page renders without `unsafe-eval`; if a
+future Panel component requires it, that is a security regression and must be
+called out in ADR-028 before it is accepted.
 
 Panel resources must be served by the dashboard itself. No CDN request is
 acceptable, and the browser network log is part of the verification checklist.

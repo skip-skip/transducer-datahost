@@ -1,11 +1,15 @@
 # Transducer dashboard
 
-Server-rendered dashboard (FastAPI + Jinja2 + HTMX + Plotly) over the existing
-read-only API. It has **no database credentials** and **no write routes on the
-read API**. The browser authenticates with a read API token, and the dashboard
-forwards that token on every data request.
+Panel dashboard (FastAPI + HoloViz Panel + Bokeh) over the existing read-only
+API. It has **no database credentials** and **no write routes on the read API**.
+The browser authenticates with a read API token, and the dashboard forwards that
+token on every data request.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
+
+> **Status:** the Panel application is mounted and authenticated. The shared
+> scene workspace is still being built, so the state schema below is the
+> version 1 layout that the next slice replaces.
 
 ## State
 
