@@ -1,8 +1,11 @@
 import json
 
+import panel as pn
+
 from transducer_dashboard.grid import (
     FigureCard,
     SceneGrid,
+    chart_placeholder,
     grid_height,
     grid_rows,
 )
@@ -118,3 +121,28 @@ def test_figure_card_title_is_editable() -> None:
     card.set_title("Temperature")
 
     assert card.ribbon.label == "Temperature"
+
+
+def test_figure_card_starts_with_a_loading_placeholder() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+
+    assert isinstance(card.chart, pn.pane.HTML)
+    assert "Loading chart" in card.chart.object
+
+
+def test_figure_card_replaces_the_chart_in_place() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+    chart = pn.pane.HTML("chart")
+
+    card.set_chart(chart)
+
+    assert card.chart is chart
+    assert card.objects[1] is chart
+    assert card.ribbon is card.objects[0]
+
+
+def test_chart_placeholder_escapes_its_message() -> None:
+    pane = chart_placeholder("<b>bad</b>", error=True)
+
+    assert "&lt;b&gt;bad&lt;/b&gt;" in pane.object
+    assert "figure-chart-error" in pane.object

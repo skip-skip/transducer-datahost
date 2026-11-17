@@ -221,13 +221,13 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   tray; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings tray: title, location (including "All locations"), analyte, range
   (24h/7d/30d), save, and confirmed delete.
-- [ ] Bokeh time-series charts for every figure in the selected scene, with loading and
+- [x] Bokeh time-series charts for every figure in the selected scene, with loading and
   inline error states.
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [x] Tests for state v2, scene/figure operations, and the Panel mount.
 - [x] Tests for the Panel scene-shell, grid, and settings-tray callbacks.
-- [ ] Tests for the chart builder.
+- [x] Tests for the chart builder.
 
 **Exit criteria**
 

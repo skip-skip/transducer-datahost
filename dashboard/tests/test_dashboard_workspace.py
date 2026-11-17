@@ -1,5 +1,6 @@
 import json
 
+import panel as pn
 import pytest
 
 from transducer_dashboard import scenes
@@ -40,6 +41,10 @@ SERIES = [
     },
 ]
 SERIES_BY_LOCATION = {1: SERIES[:2], 2: SERIES[2:]}
+POINTS = [
+    {"ts": "2026-11-10T00:00:00", "value": 1.5},
+    {"ts": "2026-11-10T01:00:00", "value": 2.5},
+]
 
 
 class FakeReadClient:
@@ -62,6 +67,19 @@ class FakeReadClient:
             if row["series_id"] == series_id:
                 return dict(row)
         raise ReadApiError(404, "series not found")
+
+    def points(
+        self,
+        token: str,
+        series_id: int,
+        *,
+        start: str,
+        end: str,
+        points: int,
+        tz: str = "local",
+        location_id: int | None = None,
+    ) -> list[dict]:
+        return [dict(row) for row in POINTS]
 
 
 def make_shell(
@@ -749,3 +767,107 @@ def test_a_failed_location_load_is_reported_in_the_tray(
     assert shell.settings_location.options == [("All locations", "")]
     assert shell.settings_message.visible is True
     assert "Could not load locations" in shell.settings_message.object
+
+
+def test_saving_a_selection_renders_a_bokeh_chart(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_analyte.value = "10"
+    shell.settings_save.clicks += 1
+
+    assert isinstance(shell.figure_cards[figure["id"]].chart, pn.pane.Bokeh)
+
+
+def test_a_chart_requests_the_configured_window_and_point_cap(
+    tmp_path, monkeypatch
+) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+    calls: list[dict] = []
+
+    def points(token: str, series_id: int, **kwargs) -> list[dict]:
+        calls.append({"series_id": series_id, **kwargs})
+        return [dict(row) for row in POINTS]
+
+    monkeypatch.setattr(shell.client, "points", points)
+    shell.settings_analyte.value = "10"
+    shell.settings_location.value = "1"
+    shell.settings_save.clicks += 1
+
+    assert len(calls) == 1
+    assert calls[0]["series_id"] == 10
+    assert calls[0]["points"] == 2000
+    assert calls[0]["tz"] == "local"
+    assert calls[0]["location_id"] == 1
+    assert calls[0]["start"] < calls[0]["end"]
+
+
+def test_a_figure_without_data_shows_an_inline_message(tmp_path, monkeypatch) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    monkeypatch.setattr(shell.client, "points", lambda *args, **kwargs: [])
+    shell.settings_analyte.value = "10"
+    shell.settings_save.clicks += 1
+
+    chart = shell.figure_cards[figure["id"]].chart
+    assert isinstance(chart, pn.pane.HTML)
+    assert "No data available for this range" in chart.object
+
+
+def test_a_failed_chart_load_does_not_break_the_scene(tmp_path, monkeypatch) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    def fail(*args, **kwargs):
+        raise ReadApiError(502, "read API is unreachable")
+
+    monkeypatch.setattr(shell.client, "points", fail)
+    shell.settings_analyte.value = "10"
+    shell.settings_save.clicks += 1
+
+    chart = shell.figure_cards[figure["id"]].chart
+    assert isinstance(chart, pn.pane.HTML)
+    assert "Could not load chart" in chart.object
+    assert "read API is unreachable" in chart.object
+    assert figure["id"] in shell.figure_cards
+
+
+def test_opening_a_scene_loads_a_chart_for_every_figure(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+
+    shell.select_figure(first["id"])
+    shell.settings_analyte.value = "10"
+    shell.settings_save.clicks += 1
+    shell.select_figure(second["id"])
+    shell.settings_analyte.value = "11"
+    shell.settings_save.clicks += 1
+
+    shell.refresh()
+
+    assert isinstance(shell.figure_cards[first["id"]].chart, pn.pane.Bokeh)
+    assert isinstance(shell.figure_cards[second["id"]].chart, pn.pane.Bokeh)
+
+
+def test_an_unconfigured_figure_shows_the_choose_prompt(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    chart = shell.figure_cards[figure["id"]].chart
+    assert isinstance(chart, pn.pane.HTML)
+    assert "Choose a location and analyte" in chart.object

@@ -12,9 +12,16 @@ from typing import Any
 
 import panel as pn
 
-from . import scenes
+from . import charts, scenes
 from .auth import Session
-from .grid import GRID_CSS, FigureCard, SceneGrid, grid_height, grid_rows
+from .grid import (
+    GRID_CSS,
+    FigureCard,
+    SceneGrid,
+    chart_placeholder,
+    grid_height,
+    grid_rows,
+)
 from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings
 from .state import (
@@ -663,12 +670,68 @@ class DashboardShell:
         self._grid_figure_ids = {
             str(id(card)): figure_id for figure_id, card in cards.items()
         }
+        self._schedule_chart_load(scene["id"])
         return pn.Column(
             grid,
             height=grid_height(rows),
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
+
+    def _schedule_chart_load(self, scene_id: str) -> None:
+        """Load every chart in the scene after the shell has rendered.
+
+        Outside a server session (tests, scripts) ``pn.state.execute`` runs the
+        callback immediately, so charts are ready when the shell is built. In
+        the browser the cards first show their loading placeholder and are
+        filled in on the next document tick.
+        """
+
+        if not self._figure_cards:
+            return
+        pn.state.execute(lambda: self.load_charts(scene_id))
+
+    def load_charts(self, scene_id: str) -> None:
+        """Fetch and render the chart for every figure in ``scene_id``."""
+
+        if scene_id != self._selected_scene_id:
+            return
+        scene = scenes.find_scene(self._state, scene_id)
+        if scene is None:
+            return
+        for figure in scene["figures"]:
+            card = self._figure_cards.get(figure["id"])
+            if card is None:
+                continue
+            card.set_chart(self._render_chart(figure))
+
+    def _render_chart(self, figure: dict[str, Any]) -> Any:
+        series_id = figure["series_id"]
+        if series_id is None:
+            return chart_placeholder("Choose a location and analyte.")
+
+        start, end = charts.window(
+            figure["range"], site_timezone=self.settings.site_timezone
+        )
+        try:
+            rows = self.client.points(
+                self.session.token,
+                series_id,
+                start=start,
+                end=end,
+                points=self.settings.max_points,
+                tz="local",
+                location_id=figure["location_id"],
+            )
+        except ReadApiError as exc:
+            return chart_placeholder(
+                f"Could not load chart: {exc.detail}", error=True
+            )
+
+        plot = charts.build_chart(rows, site_timezone=self.settings.site_timezone)
+        if plot is None:
+            return chart_placeholder("No data available for this range.")
+        return pn.pane.Bokeh(plot, sizing_mode="stretch_both")
 
     def _render_settings(self) -> pn.Column:
         self.settings_body = pn.Column(sizing_mode="stretch_width")
@@ -956,6 +1019,7 @@ class DashboardShell:
         card = self._figure_cards.get(figure_id)
         if card is not None:
             card.set_title(figure["title"])
+            card.set_chart(self._render_chart(figure))
         self._figure_delete_confirm_id = None
         self._set_status("Saved")
         self._fill_settings()

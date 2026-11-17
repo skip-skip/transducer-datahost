@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from html import escape
 from typing import Any
 
 import panel as pn
@@ -54,7 +55,18 @@ GRID_CSS = """
   height: 100%;
   color: #5b6472;
 }
+.figure-chart-error { color: #b42318; }
 """
+
+
+def chart_placeholder(message: str, *, error: bool = False) -> pn.pane.HTML:
+    """Return the inline message shown while a chart is empty or unavailable."""
+
+    css = "figure-chart-placeholder figure-chart-error" if error else "figure-chart-placeholder"
+    return pn.pane.HTML(
+        f'<div class="{css}">{escape(message)}</div>',
+        sizing_mode="stretch_both",
+    )
 
 
 class FigureCard(pn.Column):
@@ -64,6 +76,7 @@ class FigureCard(pn.Column):
         self,
         figure: dict[str, Any],
         on_select: Callable[[str], None],
+        chart: Any | None = None,
     ) -> None:
         ribbon = pn.widgets.Button(
             label=figure["title"],
@@ -72,13 +85,10 @@ class FigureCard(pn.Column):
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
-        chart = pn.pane.HTML(
-            '<div class="figure-chart-placeholder">Chart</div>',
-            sizing_mode="stretch_both",
-        )
+        body = chart if chart is not None else chart_placeholder("Loading chart…")
         super().__init__(
             ribbon,
-            chart,
+            body,
             css_classes=["figure-card"],
             sizing_mode="stretch_both",
             margin=(0, 0, 0, 0),
@@ -86,7 +96,7 @@ class FigureCard(pn.Column):
 
         self.figure_id: str = figure["id"]
         self.ribbon = ribbon
-        self.chart = chart
+        self.chart = body
 
         def handler(event: Any) -> None:
             on_select(self.figure_id)
@@ -101,6 +111,10 @@ class FigureCard(pn.Column):
 
     def set_title(self, title: str) -> None:
         self.ribbon.label = title
+
+    def set_chart(self, chart: Any) -> None:
+        self.objects = [self.ribbon, chart]
+        self.chart = chart
 
 
 class SceneGrid(pn.layout.GridStack):
@@ -243,6 +257,7 @@ __all__ = [
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",
     "SceneGrid",
+    "chart_placeholder",
     "grid_height",
     "grid_rows",
 ]

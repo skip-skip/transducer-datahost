@@ -31,6 +31,13 @@ The settings tray edits the title, location, analyte, and range (`24h`, `7d`,
 rejected, and a series with no readings at the chosen location is rejected.
 Deleting a figure takes two clicks (delete, then confirm).
 
+Every configured figure in the selected scene loads a Bokeh time-series chart.
+Charts start from a loading placeholder and are filled in after the page
+renders; an unconfigured figure asks for a location and analyte, an empty range
+says no data is available, and a read-API failure shows an inline error without
+breaking the rest of the scene. Range windows use `SITE_TIMEZONE`, and each
+request is capped at `DASHBOARD_MAX_POINTS`.
+
 Writes take a process-wide lock plus a file lock, fsync a temporary file, copy
 the previous version to `state.json.bak`, and atomically replace `state.json`.
 The container runs one uvicorn worker.
