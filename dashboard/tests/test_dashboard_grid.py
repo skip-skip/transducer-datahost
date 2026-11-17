@@ -1,0 +1,148 @@
+import json
+
+import panel as pn
+
+from transducer_dashboard.grid import (
+    FigureCard,
+    SceneGrid,
+    chart_placeholder,
+    grid_height,
+    grid_rows,
+)
+from transducer_dashboard.state import (
+    GRID_COLUMNS,
+    GRID_ROW_HEIGHT,
+    MIN_FIGURE_HEIGHT,
+    MIN_FIGURE_WIDTH,
+)
+
+
+def make_figure(figure_id: str = "fig", title: str = "Untitled figure"):
+    return {
+        "id": figure_id,
+        "title": title,
+        "location_id": None,
+        "series_id": None,
+        "range": "7d",
+        "layout": {"x": 0, "y": 0, "w": 3, "h": 2},
+    }
+
+
+def test_grid_rows_adds_working_room_below_the_figures() -> None:
+    assert grid_rows([]) == 6
+
+    figures = [make_figure()]
+    assert grid_rows(figures) == 6
+
+    figures[0]["layout"]["y"] = 8
+    assert grid_rows(figures) == 13
+
+
+def test_grid_height_uses_the_configured_row_height() -> None:
+    assert grid_height(6) == 6 * GRID_ROW_HEIGHT
+
+
+def test_scene_grid_enforces_minimum_figure_size() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6, height=grid_height(6))
+
+    assert grid.min_figure_width == MIN_FIGURE_WIDTH
+    assert grid.min_figure_height == MIN_FIGURE_HEIGHT
+    assert 'gs-min-w="{{ min_figure_width }}"' in SceneGrid._template
+    assert 'gs-min-h="{{ min_figure_height }}"' in SceneGrid._template
+
+
+def test_scene_grid_uses_the_ribbon_as_the_drag_handle() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "handle: '.figure-ribbon'" in render
+    assert "float: true" in render
+    assert "getCellFromPixel" in render
+    assert "data.cell_click = JSON.stringify" in render
+
+
+def test_cell_click_reports_the_clicked_cell_and_resets() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
+    calls: list[tuple[int, int]] = []
+    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
+
+    grid.cell_click = json.dumps({"x": 4, "y": 2, "n": 1})
+
+    assert calls == [(4, 2)]
+    assert grid.cell_click == ""
+
+
+def test_cell_click_ignores_invalid_payloads() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
+    calls: list[tuple[int, int]] = []
+    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
+
+    grid.cell_click = "not-json"
+
+    assert calls == []
+    assert grid.cell_click == ""
+
+
+def test_scene_grid_places_a_card_in_the_requested_cells() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6, height=grid_height(6))
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+
+    grid[1:3, 3:6] = card
+
+    assert len(grid.objects) == 1
+    (key, value) = next(iter(grid.objects.items()))
+    assert key == (1, 3, 3, 6)
+    assert value is card
+
+
+def test_figure_card_ribbon_selects_the_figure() -> None:
+    calls: list[str] = []
+    card = FigureCard(make_figure("fig-1"), on_select=calls.append)
+
+    card.ribbon.clicks += 1
+
+    assert calls == ["fig-1"]
+
+
+def test_figure_card_selection_toggles_the_highlight() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+
+    assert card.css_classes == ["figure-card"]
+
+    card.set_selected(True)
+    assert card.css_classes == ["figure-card", "figure-selected"]
+
+    card.set_selected(False)
+    assert card.css_classes == ["figure-card"]
+
+
+def test_figure_card_title_is_editable() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+
+    card.set_title("Temperature")
+
+    assert card.ribbon.label == "Temperature"
+
+
+def test_figure_card_starts_with_a_loading_placeholder() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+
+    assert isinstance(card.chart, pn.pane.HTML)
+    assert "Loading chart" in card.chart.object
+
+
+def test_figure_card_replaces_the_chart_in_place() -> None:
+    card = FigureCard(make_figure(), on_select=lambda figure_id: None)
+    chart = pn.pane.HTML("chart")
+
+    card.set_chart(chart)
+
+    assert card.chart is chart
+    assert card.objects[1] is chart
+    assert card.ribbon is card.objects[0]
+
+
+def test_chart_placeholder_escapes_its_message() -> None:
+    pane = chart_placeholder("<b>bad</b>", error=True)
+
+    assert "&lt;b&gt;bad&lt;/b&gt;" in pane.object
+    assert "figure-chart-error" in pane.object

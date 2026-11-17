@@ -611,38 +611,59 @@ several locations into one chart.
 
 ---
 
-## ADR-028: Scene-based grid dashboard with versioned JSON state
+## ADR-028: Use HoloViz Panel for the dashboard frontend
 
-**Status:** Accepted (implemented; automated restart/restore coverage added; manual browser verification pending)
+**Status:** Accepted (implementation in progress)
 
-**Context:** The current dashboard (ADR-026/027) shows one figure at a time from flat personal/shared lists backed by
-`state.json` `version: 1`. The desired UX is scene-based: scenes (flat containers of figures) listed in the left pane,
-a multi-figure grid workspace where figures act as panels that drag/resize and snap to grid positions, and a nested
-options pane for the selected figure or scene. This requires richer layout persistence, multi-chart rendering, and a new
-state shape, while preserving the no-database, read-API-only boundaries.
+**Context:** The dashboard v1 UI is FastAPI + Jinja2 + HTMX + Plotly. It renders a
+single selected figure at a time and keeps figures in a flat folder list. A scenes
+redesign was attempted on top of that stack and then reverted. A React rewrite was
+considered and rejected. The operator wants a Python-only frontend with a gridded scene
+canvas, a collapsible scene tray, and a settings tray, while keeping the existing
+FastAPI service, read-API boundary, signed read-token session, and JSON state volume.
 
-**Decision:** Redesign the dashboard UI and state without changing the database, read API contracts, or
-security model:
+HoloViz Panel is already used in the environment, provides a `GridStack` layout with
+drag and resize, and since Panel 1.5 can be mounted directly in FastAPI with
+`panel.io.fastapi.add_applications`.
 
-- **State:** evolve dashboard JSON state to **`version: 2`** introducing scenes, per-figure grid layout, and
-  per-user scene/selection/pane UI; migrate v1 → v2 deterministically on load/write with validation and atomic/locked
-  persistence (extending ADR-026).
-- **UI/techstack:** keep FastAPI + Jinja2 + HTMX + Plotly and the no-Node-build, vendored-assets approach; add a
-  **vendored frontend grid/windowing library** (GridStack.js 14.1.1, MIT) and client-side grid/multi-chart
-  management. Use a **hybrid** model: server-rendered/HTMX for structure, forms, and CRUD navigation; client-managed
-  grid interactions with debounced, batched layout persistence.
-- **Boundaries:** no new tables/roles/grants or read-API write routes; dashboard remains credentialless to Postgres and
-  continues to proxy user read tokens to the read API. Figure-to-data binding continues to follow ADR-027
-  (`series_id`, optional `location_id`).
+**Decision:** Replace the Jinja2/HTMX/Plotly UI with a Panel + Bokeh application mounted
+inside the existing FastAPI service.
 
-Implementation preparation details are in [docs/dashboard-scenes.md](dashboard-scenes.md).
+- Panel **>= 1.5** is required; the runtime image installs it and the development
+  environment is upgraded from 1.4.4.
+- FastAPI keeps `/login`, `/logout`, `/health`, the security headers, the read client,
+  and the JSON state store. Panel owns the dashboard UI.
+- State moves to version 2: a list of **shared** scenes, each with gridded figures.
+  There is no personal/shared split and no editor allowlist in the MVP; any valid read
+  token may create/delete scenes and edit figures.
+- A version 1 state file is archived as `state.v1.json` and replaced with an empty
+  version 2 document. Personal figures are not published into shared scenes.
+- The grid is fixed at 12 columns and 220 px rows. Figures have a minimum size of
+  3 x 2 cells.
+- Only time-series figures are implemented. Charts use Bokeh directly through
+  `pn.pane.Bokeh`.
+- The Jinja templates, HTMX, Plotly, and vendored GridStack assets are removed. No Node
+  build step is introduced.
+
+The detailed component, state, interaction, and test design is in
+[dashboard-panel-design.md](dashboard-panel-design.md).
 
 **Consequences:**
 
-- Enables multi-figure, layout-persistent workspaces but increases client-side complexity and state size.
-- Requires a careful v1→v2 migration, batched writes to limit churn, and per-figure error/performance isolation
-  (respecting `DASHBOARD_MAX_POINTS` and read limits).
-- Introduces a third-party frontend dependency that must be vendored, reviewed for license/CSP fit, and maintained.
-- Resolves the product decisions during implementation (scene as sharing unit, GridStack parameters, debounced layout
-  autosave, eager per-panel chart loading, per-scene figure cap); the cap is `DASHBOARD_MAX_FIGURES_PER_SCENE`
-  (default 50) and is enforced in the domain/API and reflected in the options pane.
+- The UI stays Python-only and shares the existing FastAPI process and Caddy route; no
+  second service or port is added.
+- The dashboard gains a Bokeh/Panel runtime and a dependency upgrade. Panel resources
+  must be served locally, not from a CDN.
+- The Content Security Policy must be widened for Bokeh/Panel inline scripts, styles, and
+  websocket connections. The final directives are measured during the mount spike; an
+  `unsafe-eval` requirement would need separate sign-off.
+- The existing JSON state, atomic-write, backup, and authentication behavior is retained.
+  A process-wide lock is added because Panel callbacks may run on multiple threads.
+- Concurrent scene edits are last-write-wins.
+- Scene/figure interaction beyond the MVP (lazy chart loading, non-time-series figures,
+  per-scene grid settings, conflict detection) is deferred.
+- No database schema, role, or read-API write route changes.
+
+This ADR supersedes the UI stack and the personal/shared figure scoping in ADR-026. It
+retains ADR-026's JSON state and authentication boundaries and ADR-027's location-based
+figure selection.

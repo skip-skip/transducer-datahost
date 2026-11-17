@@ -27,8 +27,8 @@ In scope:
 - Record per-file provenance and validation status.
 - Serve read-only data to internal consumers through a bearer-token HTTP API.
 - Return timestamps as local time or UTC on request.
-- Provide a dashboard of timeseries figures (personal and shared) that uses the read API
-  keys.
+- Provide a dashboard of shared scenes, each a gridded collection of time-series figures,
+  that uses the read API keys.
 
 Out of scope for v1:
 
@@ -38,10 +38,6 @@ Out of scope for v1:
 - Public internet exposure or SSO.
 - Automated/scheduled uploads (uploads are manual in v1).
 - Direct analyst SQL access to PostgreSQL.
-
-> **Planned dashboard redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
-> context-sensitive options pane are prepared in [docs/dashboard-scenes.md](docs/dashboard-scenes.md) (state v2,
-> no database/read-API boundary changes). See [docs/roadmap.md](docs/roadmap.md) Phase 9.
 
 ## Architecture at a glance
 
@@ -93,7 +89,7 @@ dashboard signs in with a read API token and never receives a database credentia
 | `db/tests/` | Phase 1 acceptance checks | Implemented |
 | `ingest/` | `.xle` parser/loader plus the upload API, queue worker, uploader CLI, and migration runner | Implemented |
 | `api/` | Read-only FastAPI service | Implemented |
-| `dashboard/` | Dashboard service: read-token auth, JSON figure state, HTMX/Plotly UI | Implemented |
+| `dashboard/` | Dashboard service: read-token auth, JSON scene state; Panel/Bokeh rework in progress | Partial |
 | `caddy/` | TLS reverse proxy configuration and image | Implemented |
 | `certs/` | Local TLS certificate instructions (certificates not committed) | Instructions |
 | `scripts/` | Manual upload, migration, and (planned) backup/restore helpers | Partial |
@@ -159,9 +155,8 @@ Copy `.env.example` to `.env`. The main groups are:
 - **Tokens:** `INGEST_API_TOKENS` and `READ_API_TOKENS` as comma-separated
   `label:token` pairs. The upload host also sets `INGEST_API_TOKEN` and
   `INGEST_API_URL`. The dashboard uses the same read tokens for login.
-- **Dashboard:** `DASHBOARD_SECRET_KEY` signs the session cookie; optional
-  `DASHBOARD_SHARED_EDITORS` restricts who may edit shared figures. The dashboard has no
-  database credentials.
+- **Dashboard:** `DASHBOARD_SECRET_KEY` signs the session cookie. Scenes are shared
+  between all read tokens. The dashboard has no database credentials.
 - **Limits:** `MAX_UPLOAD_BYTES`, `READ_MAX_ROWS`, `READ_MAX_WINDOW_DAYS`,
   `DASHBOARD_MAX_POINTS`, worker retry/heartbeat settings, and spool retention.
 

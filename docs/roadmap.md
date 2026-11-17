@@ -164,7 +164,7 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - Runbook reviewed by the operator.
 - Certificate rotation rehearsed.
 
-## Phase 8 — Dashboard (implemented; VM verification pending)
+## Phase 8 — Dashboard v1 (superseded by Phase 9)
 
 **Deliverables**
 
@@ -189,8 +189,8 @@ Linux VM, the TLS certificate, and the production backfill remain.
 
 - [ ] Login with a read token; invalid tokens are rejected and revoked tokens return to
   login.
-- [ ] Personal and shared figures are isolated as designed; shared edits respect
-  `DASHBOARD_SHARED_EDITORS`.
+- [ ] Personal and shared figures are isolated as designed. Phase 9 replaces this model
+  with shared scenes and removes the editor allowlist.
 - [ ] Creating, renaming, re-binding, and deleting figures works and survives a container
   restart.
 - [ ] Charts render for 24h/7d/30d, including high-frequency aquifer-test series within
@@ -198,37 +198,59 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - [ ] The dashboard container has no `POSTGRES_*` environment variables.
 - [ ] `state.json` backup and restore tested.
 
-## Phase 9 — Dashboard scenes redesign (in progress)
+## Phase 9 — Panel dashboard rework
 
-Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/decisions.md](decisions.md).
+The Jinja2/HTMX/Plotly dashboard UI is replaced by a HoloViz Panel application mounted
+inside the existing FastAPI service ([ADR-028](decisions.md#adr-028-use-holoviz-panel-for-the-dashboard-frontend)).
+The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 
-**Planned deliverables**
+**Deliverables**
 
-- [x] Evolve dashboard state to **`version: 2`** with **scenes** as flat containers of figures, per-figure grid
-  layout (`x`,`y`,`w`,`h`/constraints), scene/grid settings, and per-user UI (selected scene/figure, pane collapse);
-  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety.
-- [x] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace**, and a
-  **nested options pane** (right of the left pane) showing context-sensitive **scene or figure** options.
-- [x] Refactor dashboard domain/routes/templates for scene CRUD, figure-in-scene CRUD/binding (preserving ADR-027
-  location scoping), batched layout persistence, and multi-chart rendering (independent Plotly instances, per-figure
-  range).
-- [x] Add a **vendored, no-build** frontend grid/windowing dependency under `static/vendor/` (license documented) and
-  adopt a hybrid interaction model (HTMX/server-rendered structure & forms + client-managed grid/layout callbacks);
-  keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**. *(GridStack.js 14.1.1, MIT.)*
-- [x] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions, layout
-  payloads), and backup/restore notes for v2 state.
-- [x] Cap figures per scene with `DASHBOARD_MAX_FIGURES_PER_SCENE` (default 50), enforced in the domain/API and surfaced
-  in the options pane.
+- [x] `panel>=1.5` dependency; the Panel app is mounted in FastAPI with
+  `panel.io.fastapi.add_applications`.
+- [x] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
+  verification step are removed. The image stays Python-only.
+- [x] State version 2: shared scenes, each a collection of gridded figures. A version 1
+  `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
+- [x] Scene domain operations: create and delete scenes; per-user selected scene and tray
+  state.
+- [x] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
+- [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
+  Clicking an empty cell creates a minimum-size figure there.
+- [x] Figure title ribbon: click selects and highlights the figure and opens the settings
+  tray; drag moves the figure. Layout persists across reloads and restarts.
+- [x] Settings tray: title, location (including "All locations"), analyte, range
+  (24h/7d/30d), save, and confirmed delete.
+- [x] Bokeh time-series charts for every figure in the selected scene, with loading and
+  inline error states.
+- [x] Panel cookie validation against the existing signed session cookie, the minimum
+  Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
+- [x] Tests for state v2, scene/figure operations, and the Panel mount.
+- [x] Tests for the Panel scene-shell, grid, and settings-tray callbacks.
+- [x] Tests for the chart builder.
 
 **Exit criteria**
 
-- [x] Existing v1 `state.json` migrates to v2 without losing figure bindings/config; restart and restore behave correctly.
-- [x] Users can create/select/rename/delete personal and shared scenes; scene contents and selection persist.
-- [ ] Multiple figures render concurrently in a scene; drag/resize/snap layout persists and restores.
-- [x] Options pane reflects the selected figure or scene and enforces edit permissions (`DASHBOARD_SHARED_EDITORS`).
-- [x] Location/analyte binding, range bucketing, and `DASHBOARD_MAX_POINTS`/read limits remain correct per figure.
-- [x] Dashboard container still has no `POSTGRES_*` env vars; no DB schema/roles added; no read-API write routes.
-- [x] `state.json` (v2) backup and restore tested; unit tests and lint pass.
+- [x] Login with a read token works; an invalid or missing session shows the sign-in path.
+- [x] Create and delete scenes; a container restart preserves the remaining scenes.
+- [x] Clicking an empty cell creates a minimum-size figure; a full scene reports instead
+  of overlapping figures.
+- [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
+  and restart. (Selection and layout persistence are automated; dragging needs the
+  browser checklist.)
+- [x] Figures cannot be saved with an invalid series or an incompatible location/series
+  pair.
+- [x] Charts render for 24h/7d/30d within `DASHBOARD_MAX_POINTS`.
+- [x] Two read tokens see the same scenes.
+- [x] The dashboard container has no `POSTGRES_*` environment variables, and no database
+  schema, role, or read-API write route is added.
+- [ ] No external CDN requests; the page works under the final CSP. (Asset URLs and the
+  CSP header are automated; in-browser loading needs the browser checklist.)
+- [x] `state.json` backup and restore tested, including the v1 archive.
+- [x] Python tests, ruff, and mypy pass.
+
+The two unchecked items are the manual browser checks in
+[dashboard.md](dashboard.md#8-verification).
 
 ## Global acceptance criteria (v1)
 

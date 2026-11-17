@@ -23,7 +23,8 @@ the production backfill are pending on the Linux VM. See [docs/roadmap.md](roadm
 - Track every imported file and its validation status.
 - Expose data through a bearer-token read-only API.
 - Support local-time and UTC representations of timestamps.
-- Provide a simple dashboard with personal and shared figures backed by the read API.
+- Provide a dashboard of shared scenes, each a gridded collection of time-series figures,
+  backed by the read API.
 
 ### Out of scope (v1)
 
@@ -33,7 +34,7 @@ the production backfill are pending on the Linux VM. See [docs/roadmap.md](roadm
 - Real-time streaming; ingestion is batch and manually triggered.
 - Direct SQL access for analysts.
 - Scheduled/automated uploads.
-- Nested dashboard folders or dashboard state in PostgreSQL.
+- Dashboard state in PostgreSQL, personal or private scenes, or non-time-series figures.
 
 ## 3. System context
 
@@ -92,7 +93,7 @@ attached only to internal networks.
 | Migrate | Create/update roles and apply `db/migrations` | Linux VM, Docker (one-shot) |
 | PostgreSQL | Durable store, deduplication keys, queue, audit trail | Linux VM, Docker |
 | Read API | Read-only REST access with local/UTC time handling | Linux VM, Docker |
-| Dashboard | Server-rendered figures over the read API; personal/shared JSON state | Linux VM, Docker |
+| Dashboard | Panel scene workspace over the read API; shared JSON state | Linux VM, Docker |
 | Consumers | Analysts using the read API or the dashboard | Internal network |
 
 ## 5. Data flow
@@ -130,9 +131,9 @@ attached only to internal networks.
 - `ingest-worker`: single-writer queue worker using `transducer_ingest`; reuses
   `parse_xle`, `validate`, and `load`.
 - `read-api`: FastAPI read-only service using `transducer_read`.
-- `dashboard`: FastAPI + Jinja2 + HTMX + Plotly service with no database role. It
-  forwards the browser's read token to `read-api` and persists figures and UI state in
-  `state.json` on the `dashboard_state` volume.
+- `dashboard`: FastAPI + HoloViz Panel + Bokeh service with no database role. It
+  forwards the browser's read token to `read-api` and persists shared scenes and per-user
+  UI state in `state.json` on the `dashboard_state` volume.
 - `caddy`: TLS terminator and path router for `/ingest/*`, `/api/*`, and `/dashboard/*`.
   The only service with a published port, and the only member of the non-internal `edge`
   network.
@@ -168,7 +169,7 @@ directly.
 | XML parsing | `defusedxml` / `lxml` | Safe parsing of external files |
 | DB driver | `psycopg` 3 | Fast bulk `COPY`, modern API |
 | Read API | FastAPI | Typed endpoints, OpenAPI docs, easy read-only surface |
-| Dashboard | FastAPI + HTMX + Plotly | Server-rendered UI with no Node build step; vendored assets |
+| Dashboard | FastAPI + Panel + Bokeh | Python-only gridded UI mounted in FastAPI; no Node build step |
 | Dashboard state | JSON file on a volume | No new tables or roles; atomic writes and a file lock |
 | Time zone handling | Postgres `AT TIME ZONE` | Correct local/UTC conversion at query time |
 | Migrations | Small SQL runner | Versioned, checksummed, no heavy dependency |

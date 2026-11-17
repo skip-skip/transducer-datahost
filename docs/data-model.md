@@ -271,18 +271,22 @@ The dashboard deliberately adds no tables and no database role. Its layout state
 single JSON document on the `dashboard_state` Docker volume, owned by the dashboard
 service:
 
-- `personal[<read-token label>].scenes`: private scenes (flat containers of figures).
-- `shared.scenes`: scenes visible to every valid read token.
-- `personal[<read-token label>].ui`: selected scene/figure, pane collapse, and active view.
-- Each scene has grid settings and figures with a per-figure grid layout. Version 1 documents
-  (`personal[...].figures` / `shared.figures`) migrate on load into a default scene per scope.
+- `scenes`: shared scenes visible to every valid read token. Each scene has a name and a
+  list of figures.
+- Each figure stores `id`, `title`, optional `location_id`, optional `series_id`, a
+  `range` (`24h`, `7d`, `30d`), a grid `layout` (`x`, `y`, `w`, `h`), `created_at`, and
+  `updated_at`.
+- `ui[<read-token label>]`: selected scene, selected figure, and scene-tray collapse
+  state.
 
-A figure stores `id`, `name`, `series_id`, optional `location_id`, a grid `layout`
-(`x`, `y`, `w`, `h`), `config`, `created_by`, `created_at`, and `updated_at`. It binds to
-`transducer.series.series_id` and `transducer.location.location_id` by value only;
-there is no foreign key because the dashboard has no database connection. The UI derives
-Location and Analyte labels from `/api/locations` and `/api/locations/{id}/series`.
+Figures bind to `transducer.series.series_id` and `transducer.location.location_id` by
+value only; there is no foreign key because the dashboard has no database connection.
+The UI derives Location and Analyte labels from `/api/locations` and
+`/api/locations/{id}/series`.
 
-See [docs/dashboard.md](dashboard.md) for the document shape, atomic-write behavior, and
-backup procedure. Migrating this state into PostgreSQL later would not change the
-timeseries schema.
+A version 1 document (personal/shared figures) is archived as `state.v1.json` and
+replaced with an empty version 2 document on first load; it is never published into the
+shared scenes. See
+[docs/dashboard-panel-design.md](dashboard-panel-design.md#4-state-model-version-2) for
+the document shape, atomic-write behavior, and backup procedure. Migrating this state
+into PostgreSQL later would not change the timeseries schema.

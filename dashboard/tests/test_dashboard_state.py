@@ -1,114 +1,82 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 import pytest
 
 from transducer_dashboard.state import (
-    DEFAULT_SCENE_NAME,
-    STATE_VERSION,
+    GRID_COLUMNS,
+    MIN_FIGURE_HEIGHT,
+    MIN_FIGURE_WIDTH,
     StateError,
     StateStore,
     default_state,
-    initial_layout,
 )
 
 
-def v1_state(**overrides):
-    state = {
-        "version": 1,
-        "shared": {"figures": []},
-        "personal": {},
+def make_figure(figure_id: str = "f1", **overrides: Any) -> dict[str, Any]:
+    figure = {
+        "id": figure_id,
+        "title": "Figure",
+        "location_id": None,
+        "series_id": None,
+        "range": "7d",
+        "layout": {"x": 0, "y": 0, "w": MIN_FIGURE_WIDTH, "h": MIN_FIGURE_HEIGHT},
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
     }
-    state.update(overrides)
-    return state
+    figure.update(overrides)
+    return figure
 
 
-def test_ensure_creates_default_state(tmp_path) -> None:
+def make_scene(
+    scene_id: str = "s1",
+    figures: list[dict[str, Any]] | None = None,
+    **overrides: Any,
+) -> dict[str, Any]:
+    scene = {
+        "id": scene_id,
+        "name": "Scene 1",
+        "figures": figures if figures is not None else [],
+        "created_at": "2026-01-01T00:00:00Z",
+        "updated_at": "2026-01-01T00:00:00Z",
+    }
+    scene.update(overrides)
+    return scene
+
+
+def make_document(
+    *scenes: dict[str, Any], ui: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {"version": 2, "scenes": list(scenes), "ui": ui or {}}
+
+
+def write_document(tmp_path, document: dict[str, Any]) -> None:
+    (tmp_path / "state.json").write_text(json.dumps(document), encoding="utf-8")
+
+
+def test_ensure_creates_default_v2_state(tmp_path) -> None:
     store = StateStore(tmp_path)
 
     store.ensure()
 
     assert (tmp_path / "state.json").exists()
     assert store.load() == default_state()
-    assert store.load()["version"] == STATE_VERSION == 2
+    assert default_state()["version"] == 2
 
 
 def test_roundtrip_and_backup(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()
 
-    def add_scene(data):
-        data["shared"]["scenes"].append(
-            {
-                "id": "scene-1",
-                "name": "Operations",
-                "position": 0,
-                "grid": {"cols": 12, "row_height": 220},
-                "figures": [
-                    {
-                        "id": "abc",
-                        "name": "Figure",
-                        "series_id": 1,
-                        "location_id": None,
-                        "config": {},
-                        "layout": {"x": 0, "y": 0, "w": 6, "h": 2},
-                    }
-                ],
-                "created_by": "alice",
-                "created_at": "2026-01-01T00:00:00Z",
-                "updated_at": "2026-01-01T00:00:00Z",
-            }
-        )
+    state, _ = store.mutate(lambda data: data["scenes"].append(make_scene()))
+    assert state["scenes"][0]["name"] == "Scene 1"
 
-    state, _ = store.mutate(add_scene)
-    assert state["shared"]["scenes"][0]["name"] == "Operations"
+    store.mutate(lambda data: data["scenes"][0].update(name="Renamed"))
 
-    store.mutate(
-        lambda data: data["shared"]["scenes"][0]["figures"][0].update(name="Renamed")
-    )
-
-    assert store.load()["shared"]["scenes"][0]["figures"][0]["name"] == "Renamed"
+    assert store.load()["scenes"][0]["name"] == "Renamed"
     assert (tmp_path / "state.json.bak").exists()
     assert not (tmp_path / "state.json.tmp").exists()
-
-
-def test_v2_backup_restores_previous_document(tmp_path) -> None:
-    store = StateStore(tmp_path)
-    store.ensure()
-
-    def add_scene(scene_id: str, name: str):
-        def operation(data):
-            data["shared"]["scenes"].append(
-                {
-                    "id": scene_id,
-                    "name": name,
-                    "position": 0,
-                    "grid": {"cols": 12, "row_height": 220},
-                    "figures": [],
-                    "created_by": "alice",
-                    "created_at": "2026-01-01T00:00:00Z",
-                    "updated_at": "2026-01-01T00:00:00Z",
-                }
-            )
-
-        return operation
-
-    store.mutate(add_scene("first", "First"))
-    store.mutate(add_scene("second", "Second"))
-
-    backup = json.loads(
-        (tmp_path / "state.json.bak").read_text(encoding="utf-8")
-    )
-    assert backup["version"] == STATE_VERSION
-    assert [scene["id"] for scene in backup["shared"]["scenes"]] == ["first"]
-
-    # Restore the previous document as an operator would while the service is
-    # stopped, then start a fresh store on the same directory.
-    (tmp_path / "state.json").write_text(json.dumps(backup), encoding="utf-8")
-
-    restored = StateStore(tmp_path).load()
-    assert restored == backup
-    assert restored["version"] == STATE_VERSION
-    assert [scene["id"] for scene in restored["shared"]["scenes"]] == ["first"]
 
 
 def test_rejects_invalid_json(tmp_path) -> None:
@@ -123,257 +91,181 @@ def test_rejects_invalid_json(tmp_path) -> None:
 def test_rejects_unknown_version(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()
-    (tmp_path / "state.json").write_text(
-        json.dumps({"version": 99, "shared": {"figures": []}, "personal": {}}),
-        encoding="utf-8",
-    )
+    write_document(tmp_path, {"version": 99, "scenes": [], "ui": {}})
 
     with pytest.raises(StateError, match="unsupported state version"):
         store.load()
 
 
-def test_rejects_malformed_figure(tmp_path) -> None:
+def test_rejects_malformed_scene_and_figure(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()
-    (tmp_path / "state.json").write_text(
-        json.dumps(
-            {
-                "version": 1,
-                "shared": {"figures": [{"id": "", "name": "x"}]},
-                "personal": {},
-            }
+    write_document(
+        tmp_path,
+        make_document(make_scene(figures=[make_figure(figure_id="")])),
+    )
+
+    with pytest.raises(StateError, match="non-empty string"):
+        store.load()
+
+
+def test_rejects_duplicate_scene_and_figure_ids(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    write_document(
+        tmp_path,
+        make_document(
+            make_scene("s1", figures=[make_figure("f1")]),
+            make_scene("s2", figures=[make_figure("f1")]),
         ),
-        encoding="utf-8",
     )
 
-    with pytest.raises(StateError, match="must be a non-empty string"):
+    with pytest.raises(StateError, match="duplicate"):
+        store.load()
+
+    write_document(tmp_path, make_document(make_scene("s1"), make_scene("s1")))
+    with pytest.raises(StateError, match="duplicate"):
         store.load()
 
 
-def test_rejects_layout_outside_the_grid(tmp_path) -> None:
+def test_accepts_null_and_integer_series_scope(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()
-    state = default_state()
-    state["shared"]["scenes"].append(
-        {
-            "id": "scene-1",
-            "name": "Broken",
-            "position": 0,
-            "grid": {"cols": 12, "row_height": 220},
-            "figures": [
-                {
-                    "id": "figure-1",
-                    "name": "Too wide",
-                    "series_id": None,
-                    "location_id": None,
-                    "config": {},
-                    "layout": {"x": 6, "y": 0, "w": 8, "h": 2},
-                }
-            ],
-        }
-    )
-    (tmp_path / "state.json").write_text(json.dumps(state), encoding="utf-8")
-
-    with pytest.raises(StateError, match="extends past 12 grid columns"):
-        store.load()
-
-
-def test_migrates_v1_state_into_a_default_scene(tmp_path) -> None:
-    store = StateStore(tmp_path)
-    store.ensure()
-    legacy = v1_state(
-        shared={
-            "figures": [
-                {
-                    "id": "shared-figure",
-                    "name": "Shared level",
-                    "series_id": 42,
-                    "location_id": 7,
-                    "position": 0,
-                    "config": {"range": "24h"},
-                    "created_by": "alice",
-                    "created_at": "2026-01-01T00:00:00Z",
-                    "updated_at": "2026-01-01T00:00:00Z",
-                }
-            ]
-        },
-        personal={
-            "alice": {
-                "figures": [
-                    {
-                        "id": "personal-figure",
-                        "name": "My level",
-                        "series_id": 43,
-                        "position": 0,
-                        "config": {},
-                    }
-                ],
-                "ui": {
-                    "view": "shared",
-                    "personal": {
-                        "selected_figure_id": "personal-figure",
-                        "folders_collapsed": True,
-                    },
-                    "shared": {"selected_figure_id": "shared-figure"},
-                    "tz": "utc",
-                },
-            }
-        },
-    )
-    (tmp_path / "state.json").write_text(json.dumps(legacy), encoding="utf-8")
-
-    state = store.load()
-
-    assert state["version"] == STATE_VERSION
-    shared_scene = state["shared"]["scenes"][0]
-    assert shared_scene["name"] == DEFAULT_SCENE_NAME
-    assert shared_scene["grid"] == {"cols": 12, "row_height": 220}
-    figure = shared_scene["figures"][0]
-    assert figure["id"] == "shared-figure"
-    assert figure["series_id"] == 42
-    assert figure["location_id"] == 7
-    assert figure["config"] == {"range": "24h"}
-    assert figure["layout"] == initial_layout(0)
-    assert figure["created_by"] == "alice"
-
-    alice = state["personal"]["alice"]
-    personal_scene = alice["scenes"][0]
-    assert personal_scene["figures"][0]["id"] == "personal-figure"
-    assert alice["ui"]["view"] == "shared"
-    assert alice["ui"]["personal"] == {
-        "selected_scene_id": personal_scene["id"],
-        "selected_figure_id": "personal-figure",
-        "folders_collapsed": True,
-        "options_collapsed": False,
-    }
-    assert alice["ui"]["shared"] == {
-        "selected_scene_id": shared_scene["id"],
-        "selected_figure_id": "shared-figure",
-        "folders_collapsed": False,
-        "options_collapsed": False,
-    }
-    assert alice["ui"]["tz"] == "utc"
-
-    # The migration is written through the normal atomic path and keeps a
-    # backup of the original document.
-    assert json.loads((tmp_path / "state.json.bak").read_text(encoding="utf-8")) == legacy
-    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == state
-
-
-def test_migration_is_stable_across_reloads(tmp_path) -> None:
-    store = StateStore(tmp_path)
-    store.ensure()
-    legacy = v1_state(
-        personal={
-            "alice": {
-                "figures": [
-                    {"id": "f1", "name": "One", "series_id": 1, "config": {}},
-                    {"id": "f2", "name": "Two", "series_id": 2, "config": {}},
+    write_document(
+        tmp_path,
+        make_document(
+            make_scene(
+                figures=[
+                    make_figure("f1"),
+                    make_figure("f2", location_id=7, series_id=42),
                 ]
-            }
-        }
-    )
-    (tmp_path / "state.json").write_text(json.dumps(legacy), encoding="utf-8")
-
-    first = store.load()
-    second = store.load()
-
-    assert first == second
-    scene = first["personal"]["alice"]["scenes"][0]
-    assert [figure["id"] for figure in scene["figures"]] == ["f1", "f2"]
-    assert [figure["layout"] for figure in scene["figures"]] == [
-        initial_layout(0),
-        initial_layout(1),
-    ]
-
-
-def test_migration_keeps_unscoped_figures_unscoped(tmp_path) -> None:
-    store = StateStore(tmp_path)
-    store.ensure()
-    legacy = v1_state(
-        shared={
-            "figures": [
-                {
-                    "id": "legacy",
-                    "name": "Legacy",
-                    "series_id": 42,
-                    "position": 0,
-                    "config": {},
-                }
-            ]
-        }
-    )
-    (tmp_path / "state.json").write_text(json.dumps(legacy), encoding="utf-8")
-
-    state = store.load()
-
-    assert state["shared"]["scenes"][0]["figures"][0]["location_id"] is None
-
-
-def test_accepts_optional_location_id(tmp_path) -> None:
-    store = StateStore(tmp_path)
-    store.ensure()
-    (tmp_path / "state.json").write_text(
-        json.dumps(
-            v1_state(
-                shared={
-                    "figures": [
-                        {
-                            "id": "abc",
-                            "name": "Figure",
-                            "series_id": 1,
-                            "location_id": 7,
-                            "position": 0,
-                            "config": {},
-                        }
-                    ]
-                }
             )
         ),
-        encoding="utf-8",
     )
 
     state = store.load()
 
-    figure = state["shared"]["scenes"][0]["figures"][0]
-    assert figure["location_id"] == 7
+    assert state["scenes"][0]["figures"][0]["location_id"] is None
+    assert state["scenes"][0]["figures"][1]["location_id"] == 7
+    assert state["scenes"][0]["figures"][1]["series_id"] == 42
 
 
-def test_rejects_non_integer_location_id(tmp_path) -> None:
+@pytest.mark.parametrize(
+    ("overrides", "match"),
+    [
+        ({"location_id": "7"}, "location_id"),
+        ({"series_id": 1.5}, "series_id"),
+        ({"range": "1y"}, "range"),
+        ({"layout": {"x": 0, "y": 0, "w": 2, "h": 2}}, "at least 3"),
+        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 1}}, "at least 2"),
+        ({"layout": {"x": 10, "y": 0, "w": 3, "h": 2}}, "fit within"),
+        ({"layout": {"x": -1, "y": 0, "w": 3, "h": 2}}, "non-negative"),
+        ({"layout": {"x": 0, "y": 0, "w": 3}}, "missing keys"),
+        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 2, "z": 1}}, "unknown keys"),
+    ],
+)
+def test_rejects_invalid_figure_fields(
+    tmp_path, overrides: dict[str, Any], match: str
+) -> None:
     store = StateStore(tmp_path)
     store.ensure()
-    (tmp_path / "state.json").write_text(
-        json.dumps(
-            v1_state(
-                shared={
-                    "figures": [
-                        {
-                            "id": "abc",
-                            "name": "Figure",
-                            "series_id": 1,
-                            "location_id": "7",
-                            "position": 0,
-                            "config": {},
-                        }
-                    ]
-                }
-            )
-        ),
-        encoding="utf-8",
+    write_document(
+        tmp_path,
+        make_document(make_scene(figures=[make_figure(**overrides)])),
     )
 
-    with pytest.raises(StateError, match="location_id"):
+    with pytest.raises(StateError, match=match):
         store.load()
+
+
+@pytest.mark.parametrize(
+    ("ui", "match"),
+    [
+        ({"alice": {"view": "personal"}}, "unknown keys"),
+        ({"alice": {"selected_scene_id": 7}}, "non-empty string or null"),
+        ({"alice": {"scenes_tray_collapsed": "yes"}}, "boolean"),
+        ({"": {}}, "non-empty strings"),
+    ],
+)
+def test_rejects_invalid_ui(tmp_path, ui: dict[str, Any], match: str) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    write_document(tmp_path, make_document(ui=ui))
+
+    with pytest.raises(StateError, match=match):
+        store.load()
+
+
+def test_version_1_document_is_archived_not_published(tmp_path) -> None:
+    legacy = {
+        "version": 1,
+        "shared": {"figures": [{"id": "old", "name": "Old", "position": 0}]},
+        "personal": {"alice": {"figures": [], "ui": {}}},
+    }
+    write_document(tmp_path, legacy)
+    store = StateStore(tmp_path)
+
+    state = store.load()
+
+    assert state == default_state()
+    archive = tmp_path / "state.v1.json"
+    assert archive.exists()
+    assert json.loads(archive.read_text(encoding="utf-8")) == legacy
+    assert json.loads((tmp_path / "state.json").read_text(encoding="utf-8")) == state
+    assert json.loads((tmp_path / "state.json.bak").read_text(encoding="utf-8")) == legacy
+
+
+def test_ensure_archives_a_version_1_document(tmp_path) -> None:
+    legacy = {"version": 1, "shared": {"figures": []}, "personal": {}}
+    write_document(tmp_path, legacy)
+    store = StateStore(tmp_path)
+
+    store.ensure()
+
+    assert (tmp_path / "state.v1.json").exists()
+    assert store.load() == default_state()
+
+
+def test_ensure_rejects_an_invalid_v2_document(tmp_path) -> None:
+    write_document(tmp_path, make_document(make_scene(name="")))
+    store = StateStore(tmp_path)
+
+    with pytest.raises(StateError, match="non-empty string"):
+        store.ensure()
+
+
+def test_concurrent_mutations_do_not_lose_updates(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+
+    def add_scene(index: int) -> None:
+        store.mutate(
+            lambda data: data["scenes"].append(make_scene(f"s{index}", name=f"Scene {index}"))
+        )
+
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        list(executor.map(add_scene, range(16)))
+
+    scenes = store.load()["scenes"]
+    assert len(scenes) == 16
+    assert {scene["id"] for scene in scenes} == {f"s{index}" for index in range(16)}
 
 
 def test_mutate_does_not_persist_invalid_state(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()
 
-    def break_it(data):
-        data["shared"]["scenes"].append({"id": "x", "name": ""})
+    def break_it(data: dict[str, Any]) -> None:
+        data["scenes"].append({"id": "x"})
 
     with pytest.raises(StateError):
         store.mutate(break_it)
 
     assert store.load() == default_state()
+
+
+def test_default_document_is_valid() -> None:
+    from transducer_dashboard.state import validate_state
+
+    assert validate_state(default_state()) == default_state()
+    assert GRID_COLUMNS == 12

@@ -1,105 +1,82 @@
-"""FastAPI + HTMX dashboard over the read-only transducer API.
+"""FastAPI service hosting the Panel dashboard over the read-only transducer API.
 
 The service holds no database credentials. It authenticates the browser with a
 read API token, forwards that token on every read API call, and persists only
 its own layout state as a JSON file on a Docker volume.
+
+FastAPI owns login, logout, health, and the security headers. The dashboard UI is
+a HoloViz Panel application mounted at the root of the same process.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta
-from pathlib import Path
+import html
 from typing import Any
-from zoneinfo import ZoneInfo
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Query, Request
+from fastapi import FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
-from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
-from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
-from pydantic import BaseModel
+from panel.io.fastapi import add_applications
 
-from . import figures as figure_ops
-from .figures import (
-    SCOPES,
-    FigureError,
-    FigureNotFound,
-    FigurePermissionError,
-    SceneNotFound,
-)
+from .auth import COOKIE_NAME, Session, SessionCodec
+from .panel_app import create_panel_app
 from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings, SettingsError
 from .state import StateStore
 
-COOKIE_NAME = "transducer_dashboard"
-COOKIE_SALT = "transducer-dashboard-session"
-RANGES = {
-    "24h": timedelta(hours=24),
-    "7d": timedelta(days=7),
-    "30d": timedelta(days=30),
-}
-DEFAULT_RANGE = "7d"
+CSP = (
+    "default-src 'self'; "
+    "script-src 'self' 'unsafe-inline'; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' data:; "
+    "font-src 'self' data:; "
+    "connect-src 'self' ws: wss:; "
+    "worker-src 'self' blob:; "
+    "frame-ancestors 'none'; "
+    "base-uri 'self'; "
+    "form-action 'self'"
+)
 
 
-class NotAuthenticated(Exception):
-    pass
+def _login_page(error: str | None) -> str:
+    alert = ""
+    if error:
+        alert = f'<p class="error" role="alert">{html.escape(error)}</p>'
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sign in · Transducer dashboard</title>
+  <style>
+    body {{ margin: 0; font-family: system-ui, sans-serif; background: #f5f6f8; color: #1d2433; }}
+    main {{ max-width: 26rem; margin: 12vh auto; padding: 2rem; background: #fff;
+            border: 1px solid #d8dde6; border-radius: 0.5rem; }}
+    h1 {{ margin-top: 0; font-size: 1.4rem; }}
+    label {{ display: block; margin-bottom: 0.4rem; font-weight: 600; }}
+    input {{ box-sizing: border-box; width: 100%; padding: 0.6rem; font: inherit;
+             border: 1px solid #9aa4b5; border-radius: 0.3rem; }}
+    button {{ margin-top: 1rem; padding: 0.6rem 1.2rem; font: inherit; cursor: pointer; }}
+    .error {{ color: #a11616; }}
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Transducer dashboard</h1>
+    <p>Sign in with a read API token.</p>
+    {alert}
+    <form method="post" action="login">
+      <label for="token">Read API token</label>
+      <input id="token" name="token" type="password" autocomplete="off" required autofocus>
+      <button type="submit">Sign in</button>
+    </form>
+  </main>
+</body>
+</html>"""
 
 
-class LayoutItem(BaseModel):
-    id: str
-    x: int
-    y: int
-    w: int
-    h: int
-
-
-class LayoutPayload(BaseModel):
-    figures: list[LayoutItem]
-
-
-@dataclass(frozen=True)
-class Session:
-    label: str
-    token: str
-
-
-def _default_range(settings: DashboardSettings) -> str:
-    if settings.default_window_days <= 1:
-        return "24h"
-    if settings.default_window_days <= 7:
-        return "7d"
-    return "30d"
-
-
-def _names_from_locations(rows: list[dict[str, Any]]) -> dict[int, str]:
-    """Map ``location_id`` to name from a ``GET /locations`` response."""
-    names: dict[int, str] = {}
-    for row in rows:
-        raw = row.get("location_id") if isinstance(row, dict) else None
-        if isinstance(raw, int):
-            name = row.get("name")
-            names[raw] = name if isinstance(name, str) else ""
-    return names
-
-
-def _parse_optional_int(raw: str, field: str) -> int | None:
-    try:
-        return int(raw) if raw.strip() else None
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail=f"invalid {field}") from exc
-
-
-def _parse_positive_int(raw: str, field: str) -> int:
-    try:
-        value = int(raw)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail=f"{field} must be an integer"
-        ) from exc
-    if value < 1:
-        raise HTTPException(status_code=400, detail=f"{field} must be positive")
-    return value
+def _dashboard_url(request: Request) -> str:
+    root_path = (request.scope.get("root_path") or "").rstrip("/")
+    return f"{root_path}/"
 
 
 def create_app(
@@ -113,56 +90,32 @@ def create_app(
     store = StateStore(settings.state_dir)
     store.ensure()
 
-    serializer = URLSafeTimedSerializer(settings.secret_key, salt=COOKIE_SALT)
-
-    package_dir = Path(__file__).parent
-    templates = Jinja2Templates(directory=str(package_dir / "templates"))
+    codec = SessionCodec(settings.secret_key, settings.session_max_age)
 
     app = FastAPI(
         title="Transducer dashboard",
-        version="1.0.0",
+        version="2.0.0",
         docs_url=None,
         redoc_url=None,
         openapi_url=None,
     )
-    app.mount(
-        "/static",
-        StaticFiles(directory=str(package_dir / "static")),
-        name="static",
+
+    # Panel is mounted before the security middleware so that the middleware
+    # wraps both FastAPI and Panel responses. FastAPI routes declared below take
+    # precedence over the Panel application for paths such as /login and
+    # /health.
+    add_applications(
+        {"/": create_panel_app(settings, codec, store, client)},
+        app=app,
+        title="Transducer dashboard",
+        location=False,
     )
 
     def cookie_path(request: Request) -> str:
         return request.scope.get("root_path") or "/"
 
     def read_session(request: Request) -> Session | None:
-        raw = request.cookies.get(COOKIE_NAME)
-        if not raw:
-            return None
-        try:
-            payload = serializer.loads(raw, max_age=settings.session_max_age)
-        except (BadSignature, SignatureExpired):
-            return None
-        if not isinstance(payload, dict):
-            return None
-        label = payload.get("label")
-        token = payload.get("token")
-        if not isinstance(label, str) or not label:
-            return None
-        if not isinstance(token, str) or not token:
-            return None
-        return Session(label=label, token=token)
-
-    def require_session(request: Request) -> Session:
-        session = read_session(request)
-        if session is None:
-            raise NotAuthenticated()
-        return session
-
-    @app.exception_handler(NotAuthenticated)
-    async def _not_authenticated(request: Request, _exc: NotAuthenticated) -> Response:
-        response = RedirectResponse(request.url_for("login_page"), status_code=303)
-        response.delete_cookie(COOKIE_NAME, path=cookie_path(request))
-        return response
+        return codec.from_cookies(request.cookies)
 
     @app.middleware("http")
     async def security_headers(request: Request, call_next: Any) -> Response:
@@ -170,154 +123,34 @@ def create_app(
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
-        response.headers.setdefault(
-            "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "
-            "img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'",
-        )
+        response.headers.setdefault("Content-Security-Policy", CSP)
         return response
-
-    def redirect(request: Request, endpoint: str = "index") -> RedirectResponse:
-        return RedirectResponse(request.url_for(endpoint), status_code=303)
-
-    def page_context(request: Request, session: Session, **extra: Any) -> dict[str, Any]:
-        context = {
-            "request": request,
-            "session": session,
-            "shared_editors": settings.shared_editors,
-            "ranges": list(RANGES),
-        }
-        context.update(extra)
-        return context
-
-    def chart_payload(
-        session: Session,
-        series: dict[str, Any],
-        range_key: str,
-        location_id: int | None = None,
-        location_names: dict[int, str] | None = None,
-    ) -> dict[str, Any]:
-        end = datetime.now(ZoneInfo(settings.site_timezone)).replace(
-            tzinfo=None, microsecond=0
-        )
-        start = end - RANGES[range_key]
-        points = client.points(
-            session.token,
-            int(series["series_id"]),
-            start=start.isoformat(),
-            end=end.isoformat(),
-            points=settings.max_points,
-            tz="local",
-            location_id=location_id,
-        )
-        # The label names the location and the logger so a chart stays
-        # attributable when a location has hosted several instruments.
-        segments: list[str] = []
-        if location_id is not None:
-            name = (location_names or {}).get(location_id)
-            if name:
-                segments.append(name)
-        if series.get("serial_number"):
-            segments.append(str(series["serial_number"]))
-        segments.append(f"{series.get('identification', 'value')} ({series.get('unit', '')})")
-        label = " · ".join(segments)
-        return {
-            "series_id": series["series_id"],
-            "location_id": location_id,
-            "label": label,
-            "unit": series.get("unit", ""),
-            "range": range_key,
-            "points": points,
-        }
-
-    def location_names(session: Session) -> dict[int, str]:
-        """Names for chart labels; tolerant of errors other than dead sessions."""
-        try:
-            rows = client.locations(session.token)
-        except ReadApiError as exc:
-            api_failure(exc)  # raises only for a dead session; otherwise no names
-            return {}
-        return _names_from_locations(rows)
-
-    def api_failure(exc: ReadApiError) -> str:
-        if exc.status_code == 401:
-            raise NotAuthenticated()
-        return exc.detail
-
-    def validate_binding(
-        session: Session,
-        parsed_series: int | None,
-        parsed_location: int | None,
-    ) -> None:
-        # Reject binding to a series that does not exist so a stale figure
-        # cannot silently render an empty chart forever.
-        if parsed_series is not None:
-            try:
-                client.series_detail(session.token, parsed_series)
-            except ReadApiError as exc:
-                if exc.status_code == 404:
-                    raise HTTPException(
-                        status_code=400, detail="selected series does not exist"
-                    ) from exc
-                api_failure(exc)
-
-        # A location-scoped figure must pair a series that actually has
-        # readings recorded at that location; otherwise the chart would
-        # render permanently empty for a logger that never served the well.
-        if parsed_location is not None:
-            try:
-                at_location = client.series_at_location(
-                    session.token, parsed_location
-                )
-            except ReadApiError as exc:
-                if exc.status_code == 404:
-                    raise HTTPException(
-                        status_code=400, detail="selected location does not exist"
-                    ) from exc
-                api_failure(exc)
-            if parsed_series is not None and parsed_series not in {
-                item.get("series_id") for item in at_location
-            }:
-                raise HTTPException(
-                    status_code=400,
-                    detail="selected series has no readings at this location",
-                )
 
     # -- authentication ----------------------------------------------------
 
     @app.get("/login", name="login_page", response_class=HTMLResponse)
     def login_page(request: Request) -> Response:
         if read_session(request) is not None:
-            return redirect(request)
-        return templates.TemplateResponse(
-            request, "login.html", page_context(request, Session("", ""), error=None)
-        )
+            return RedirectResponse(_dashboard_url(request), status_code=303)
+        return HTMLResponse(_login_page(None))
 
     @app.post("/login", name="login")
     def login(request: Request, token: str = Form("")) -> Response:
         token = token.strip()
         if not token:
-            return templates.TemplateResponse(
-                request,
-                "login.html",
-                page_context(request, Session("", ""), error="Enter a read API token."),
-                status_code=400,
+            return HTMLResponse(
+                _login_page("Enter a read API token."), status_code=400
             )
         try:
             label = client.whoami(token)
         except ReadApiError as exc:
             status = 401 if exc.status_code == 401 else 502
-            return templates.TemplateResponse(
-                request,
-                "login.html",
-                page_context(request, Session("", ""), error=exc.detail),
-                status_code=status,
-            )
+            return HTMLResponse(_login_page(exc.detail), status_code=status)
 
-        response = redirect(request)
+        response = RedirectResponse(_dashboard_url(request), status_code=303)
         response.set_cookie(
             COOKIE_NAME,
-            serializer.dumps({"label": label, "token": token}),
+            codec.dump(label, token),
             max_age=settings.session_max_age,
             httponly=True,
             secure=settings.cookie_secure,
@@ -328,541 +161,20 @@ def create_app(
 
     @app.post("/logout", name="logout")
     def logout(request: Request) -> Response:
-        response = redirect(request, "login_page")
+        response = RedirectResponse(request.url_for("login_page"), status_code=303)
         response.delete_cookie(COOKIE_NAME, path=cookie_path(request))
         return response
 
-    # -- pages -------------------------------------------------------------
+    # -- health ------------------------------------------------------------
 
     @app.get("/health", name="health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.get("/", name="index", response_class=HTMLResponse)
-    def index(
-        request: Request,
-        session: Session = Depends(require_session),
-        range: str = Query(""),
-    ) -> Response:
-        state = store.load()
-        ui = figure_ops.get_ui(state, session.label)
-        scope = request.query_params.get("scope") or ui.get("view") or "personal"
-        if scope not in SCOPES:
-            scope = "personal"
-
-        scenes = figure_ops.list_scenes(state, scope, session.label)
-        selected_scene_id = ui[scope].get("selected_scene_id")
-        scene = next(
-            (item for item in scenes if item.get("id") == selected_scene_id), None
-        )
-        if scene is None and scenes:
-            # A stale or absent selection falls back to the first scene for
-            # display only; the stored selection is left untouched on GET.
-            scene = scenes[0]
-
-        figures = figure_ops.list_scene_figures(scene) if scene else []
-        selected_figure_id = ui[scope].get("selected_figure_id")
-        figure = next(
-            (item for item in figures if item.get("id") == selected_figure_id), None
-        )
-        figure_limit = settings.max_figures_per_scene
-        at_figure_limit = scene is not None and len(figures) >= figure_limit
-
-        range_key = range if range in RANGES else _default_range(settings)
-        locations: list[dict[str, Any]] = []
-        analytes: list[dict[str, Any]] = []
-        error: str | None = None
-
-        if figure is not None:
-            try:
-                locations = client.locations(session.token)
-                figure_location = figure.get("location_id")
-                if figure_location is not None:
-                    # Strict scoping: only series with readings recorded at the
-                    # bound location, so the selector matches what the chart can
-                    # show for a logger that has also served other wells.
-                    analytes = client.series_at_location(
-                        session.token, int(figure_location)
-                    )
-                elif figure.get("series_id"):
-                    # Figures saved before location scoping (and deliberately
-                    # un-scoped ones) keep the whole series selectable.
-                    analytes = [
-                        client.series_detail(
-                            session.token, int(figure["series_id"])
-                        )
-                    ]
-            except ReadApiError as exc:
-                error = api_failure(exc)
-
-        return templates.TemplateResponse(
-            request,
-            "index.html",
-            page_context(
-                request,
-                session,
-                scope=scope,
-                scenes=scenes,
-                scene=scene,
-                figures=figures,
-                figure=figure,
-                selected_scene_id=scene.get("id") if scene else None,
-                selected_figure_id=figure.get("id") if figure else None,
-                ui=ui,
-                locations=locations,
-                analytes=analytes,
-                range_key=range_key,
-                figure_limit=figure_limit,
-                at_figure_limit=at_figure_limit,
-                can_edit=figure_ops.can_edit(
-                    scope, session.label, settings.shared_editors
-                ),
-                error=error,
-            ),
-        )
-
-    # -- HTMX partials -----------------------------------------------------
-
-    @app.get("/partials/analytes", name="analytes_partial", response_class=HTMLResponse)
-    def analytes_partial(
-        request: Request,
-        location_id: str = Query(""),
-        selected: int | None = Query(None),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        options: list[dict[str, Any]] = []
-        location_chosen = False
-        error: str | None = None
-        if location_id.strip():
-            location_chosen = True
-            try:
-                parsed = int(location_id)
-            except ValueError as exc:
-                raise HTTPException(
-                    status_code=400, detail="invalid location"
-                ) from exc
-            try:
-                options = client.series_at_location(session.token, parsed)
-            except ReadApiError as exc:
-                error = api_failure(exc)
-        else:
-            # "All locations": offer every series, matching un-scoped figures.
-            try:
-                options = client.series(session.token)
-            except ReadApiError as exc:
-                error = api_failure(exc)
-        return templates.TemplateResponse(
-            request,
-            "_analytes.html",
-            {
-                "request": request,
-                "analytes": options,
-                "selected_series_id": selected,
-                "location_chosen": location_chosen,
-                "error": error,
-            },
-        )
-
-    @app.get("/partials/chart", name="chart_partial", response_class=HTMLResponse)
-    def chart_partial(
-        request: Request,
-        scene_id: str = Query(...),
-        figure_id: str = Query(...),
-        scope: str = Query("personal"),
-        range: str = Query(DEFAULT_RANGE),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-
-        state = store.load()
-        scene = figure_ops.get_scene(state, scope, session.label, scene_id)
-        if scene is None:
-            raise HTTPException(status_code=404, detail="scene not found")
-        figure = figure_ops.get_scene_figure(
-            state, scope, session.label, scene_id, figure_id
-        )
-        if figure is None:
-            raise HTTPException(status_code=404, detail="figure not found")
-
-        range_key = range if range in RANGES else _default_range(settings)
-        chart: dict[str, Any] | None = None
-        error: str | None = None
-        if figure.get("series_id"):
-            figure_location = figure.get("location_id")
-            try:
-                series_detail = client.series_detail(
-                    session.token, int(figure["series_id"])
-                )
-                chart = chart_payload(
-                    session,
-                    series_detail,
-                    range_key,
-                    location_id=figure_location,
-                    location_names=(
-                        location_names(session)
-                        if figure_location is not None
-                        else None
-                    ),
-                )
-            except ReadApiError as exc:
-                error = api_failure(exc)
-        return templates.TemplateResponse(
-            request,
-            "_chart.html",
-            {
-                "request": request,
-                "chart": chart,
-                "error": error,
-                "figure": figure,
-                "scene": scene,
-                "scope": scope,
-                "range_key": range_key,
-            },
-        )
-
-    # -- scene and figure mutations ---------------------------------------
-
-    @app.post("/scenes", name="create_scene")
-    def create_scene(
-        request: Request,
-        scope: str = Form("personal"),
-        name: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        try:
-            store.mutate(
-                lambda state: figure_ops.create_scene(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    name=name or None,
-                )
-            )
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except FigureError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post("/scenes/{scope}/{scene_id}", name="update_scene")
-    def update_scene(
-        request: Request,
-        scope: str,
-        scene_id: str,
-        name: str = Form(""),
-        cols: str = Form(""),
-        row_height: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        cleaned = name.strip()
-        if not cleaned:
-            raise HTTPException(status_code=400, detail="name must not be blank")
-        parsed_cols = _parse_positive_int(cols, "grid cols")
-        parsed_row_height = _parse_positive_int(row_height, "grid row height")
-
-        try:
-            store.mutate(
-                lambda state: figure_ops.update_scene(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    scene_id,
-                    name=cleaned,
-                    grid={"cols": parsed_cols, "row_height": parsed_row_height},
-                )
-            )
-        except SceneNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except FigureError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post("/scenes/{scope}/{scene_id}/layout", name="save_scene_layout")
-    def save_scene_layout(
-        scope: str,
-        scene_id: str,
-        payload: LayoutPayload,
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        if not payload.figures:
-            raise HTTPException(status_code=400, detail="no layouts provided")
-        try:
-            store.mutate(
-                lambda state: figure_ops.update_scene_layouts(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    scene_id,
-                    [item.model_dump() for item in payload.figures],
-                )
-            )
-        except (SceneNotFound, FigureNotFound) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except FigureError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return Response(status_code=204)
-
-    @app.post("/scenes/{scope}/{scene_id}/delete", name="delete_scene")
-    def delete_scene(
-        request: Request,
-        scope: str,
-        scene_id: str,
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        try:
-            store.mutate(
-                lambda state: figure_ops.delete_scene(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    scene_id,
-                )
-            )
-        except SceneNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post(
-        "/scenes/{scope}/{scene_id}/figures", name="create_scene_figure"
-    )
-    def create_scene_figure(
-        request: Request,
-        scope: str,
-        scene_id: str,
-        name: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        try:
-            store.mutate(
-                lambda state: figure_ops.create_scene_figure(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    scene_id,
-                    name=name or None,
-                    max_figures=settings.max_figures_per_scene,
-                )
-            )
-        except SceneNotFound as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except FigureError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post(
-        "/scenes/{scope}/{scene_id}/figures/{figure_id}",
-        name="update_scene_figure",
-    )
-    def update_scene_figure(
-        request: Request,
-        scope: str,
-        scene_id: str,
-        figure_id: str,
-        name: str = Form(""),
-        series_id: str = Form(""),
-        location_id: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        cleaned = name.strip()
-        if not cleaned:
-            raise HTTPException(status_code=400, detail="name must not be blank")
-        parsed_series = _parse_optional_int(series_id, "series")
-        parsed_location = _parse_optional_int(location_id, "location")
-        validate_binding(session, parsed_series, parsed_location)
-
-        def operation(state: dict[str, Any]) -> dict[str, Any]:
-            existing = figure_ops.get_scene_figure(
-                state, scope, session.label, scene_id, figure_id
-            )
-            if existing is None:
-                raise FigureNotFound("figure not found")
-            config = dict(existing.get("config") or {})
-            return figure_ops.update_scene_figure(
-                state,
-                scope,
-                session.label,
-                settings.shared_editors,
-                scene_id,
-                figure_id,
-                name=cleaned,
-                series_id=parsed_series,
-                location_id=parsed_location,
-                config=config,
-            )
-
-        try:
-            store.mutate(operation)
-        except (SceneNotFound, FigureNotFound) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        except FigureError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post(
-        "/scenes/{scope}/{scene_id}/figures/{figure_id}/delete",
-        name="delete_scene_figure",
-    )
-    def delete_scene_figure(
-        request: Request,
-        scope: str,
-        scene_id: str,
-        figure_id: str,
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        try:
-            store.mutate(
-                lambda state: figure_ops.delete_scene_figure(
-                    state,
-                    scope,
-                    session.label,
-                    settings.shared_editors,
-                    scene_id,
-                    figure_id,
-                )
-            )
-        except (SceneNotFound, FigureNotFound) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        except FigurePermissionError as exc:
-            raise HTTPException(status_code=403, detail=str(exc)) from exc
-        return redirect(request)
-
-    # -- persisted UI state ------------------------------------------------
-
-    @app.post("/ui/view", name="set_view")
-    def set_view(
-        request: Request,
-        scope: str = Form("personal"),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-        store.mutate(
-            lambda state: figure_ops.set_ui(state, session.label, view=scope)
-        )
-        return redirect(request)
-
-    @app.post("/ui/select", name="select_context")
-    def select_context(
-        request: Request,
-        scope: str = Form("personal"),
-        scene_id: str = Form(""),
-        figure_id: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        if scope not in SCOPES:
-            raise HTTPException(status_code=400, detail="unknown scope")
-
-        def operation(state: dict[str, Any]) -> None:
-            scene = (
-                figure_ops.get_scene(state, scope, session.label, scene_id)
-                if scene_id
-                else None
-            )
-            if scene_id and scene is None:
-                raise SceneNotFound("scene not found")
-
-            selected_figure_id = None
-            if scene is not None and figure_id:
-                figure = figure_ops.get_scene_figure(
-                    state, scope, session.label, scene["id"], figure_id
-                )
-                if figure is None:
-                    raise FigureNotFound("figure not found")
-                selected_figure_id = figure_id
-
-            figure_ops.set_ui(
-                state,
-                session.label,
-                view=scope,
-                **{
-                    scope: {
-                        "selected_scene_id": scene.get("id") if scene else None,
-                        "selected_figure_id": selected_figure_id,
-                    }
-                },
-            )
-
-        try:
-            store.mutate(operation)
-        except (SceneNotFound, FigureNotFound) as exc:
-            raise HTTPException(status_code=404, detail=str(exc)) from exc
-        return redirect(request)
-
-    @app.post("/ui/toggle-folders", name="toggle_folders")
-    def toggle_folders(
-        request: Request,
-        scope: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        def operation(state: dict[str, Any]) -> None:
-            ui = figure_ops.get_ui(state, session.label)
-            target = scope if scope in SCOPES else ui.get("view", "personal")
-            if target not in SCOPES:
-                target = "personal"
-            collapsed = bool(ui[target].get("folders_collapsed"))
-            figure_ops.set_ui(
-                state,
-                session.label,
-                **{target: {"folders_collapsed": not collapsed}},
-            )
-
-        store.mutate(operation)
-        return redirect(request)
-
-    @app.post("/ui/toggle-options", name="toggle_options")
-    def toggle_options(
-        request: Request,
-        scope: str = Form(""),
-        session: Session = Depends(require_session),
-    ) -> Response:
-        def operation(state: dict[str, Any]) -> None:
-            ui = figure_ops.get_ui(state, session.label)
-            target = scope if scope in SCOPES else ui.get("view", "personal")
-            if target not in SCOPES:
-                target = "personal"
-            collapsed = bool(ui[target].get("options_collapsed"))
-            figure_ops.set_ui(
-                state,
-                session.label,
-                **{target: {"options_collapsed": not collapsed}},
-            )
-
-        store.mutate(operation)
-        return redirect(request)
-
     app.state.settings = settings
     app.state.read_client = client
     app.state.store = store
+    app.state.session_codec = codec
     return app
 
 
