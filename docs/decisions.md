@@ -608,3 +608,40 @@ several locations into one chart.
   the cost of disambiguation.
 - Selecting "All locations" remains possible and behaves like a legacy figure; it is
   offered for continuity rather than recommended for new figures.
+
+---
+
+## ADR-028: Scene-based grid dashboard with versioned JSON state (planned)
+
+**Status:** Proposed (implementation preparation documented; accept on implementation)
+
+**Context:** The current dashboard (ADR-026/027) shows one figure at a time from flat personal/shared lists backed by
+`state.json` `version: 1`. The desired UX is scene-based: scenes (flat containers of figures) listed in the left pane,
+a multi-figure grid workspace where figures act as panels that drag/resize and snap to grid positions, and a nested
+options pane for the selected figure or scene. This requires richer layout persistence, multi-chart rendering, and a new
+state shape, while preserving the no-database, read-API-only boundaries.
+
+**Decision (planned):** Redesign the dashboard UI and state without changing the database, read API contracts, or
+security model:
+
+- **State:** evolve dashboard JSON state to **`version: 2`** introducing scenes, per-figure grid layout, and
+  per-user scene/selection/pane UI; migrate v1 → v2 deterministically on load/write with validation and atomic/locked
+  persistence (extending ADR-026).
+- **UI/techstack:** keep FastAPI + Jinja2 + HTMX + Plotly and the no-Node-build, vendored-assets approach; add a
+  **vendored frontend grid/windowing library** (to be selected, license-compatible) and client-side grid/multi-chart
+  management. Use a **hybrid** model: server-rendered/HTMX for structure, forms, and CRUD navigation; client-managed
+  grid interactions with batched layout persistence.
+- **Boundaries:** no new tables/roles/grants or read-API write routes; dashboard remains credentialless to Postgres and
+  continues to proxy user read tokens to the read API. Figure-to-data binding continues to follow ADR-027
+  (`series_id`, optional `location_id`).
+
+Implementation preparation details are in [docs/dashboard-scenes.md](dashboard-scenes.md).
+
+**Consequences:**
+
+- Enables multi-figure, layout-persistent workspaces but increases client-side complexity and state size.
+- Requires a careful v1→v2 migration, batched writes to limit churn, and per-figure error/performance isolation
+  (respecting `DASHBOARD_MAX_POINTS` and read limits).
+- Introduces a third-party frontend dependency that must be vendored, reviewed for license/CSP fit, and maintained.
+- Defers several product decisions to implementation (sharing granularity as scene, grid library/parameters, save UX,
+  scene-open loading strategy, figure caps) which must be finalized and reflected back into docs/tests.

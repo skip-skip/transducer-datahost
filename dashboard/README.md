@@ -7,6 +7,11 @@ forwards that token on every data request.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
+> **Planned redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
+> context-sensitive options pane are planned (state v2, no DB/read-API boundary changes). See
+> [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current
+> implementation.
+
 ## State
 
 Layout state is a single JSON file on the Compose volume `dashboard_state`,

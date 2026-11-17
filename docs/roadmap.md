@@ -198,6 +198,37 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - [ ] The dashboard container has no `POSTGRES_*` environment variables.
 - [ ] `state.json` backup and restore tested.
 
+## Phase 9 — Dashboard scenes redesign (planned, prep complete in docs)
+
+Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/decisions.md](decisions.md).
+
+**Planned deliverables**
+
+- [ ] Evolve dashboard state to **`version: 2`** with **scenes** as flat containers of figures, per-figure grid
+  layout (`x`,`y`,`w`,`h`/constraints), scene/grid settings, and per-user UI (selected scene/figure, pane collapse);
+  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety.
+- [ ] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace** (figures as
+  window-like panels that drag/resize and **snap** to the grid), and a **nested options pane** (right of the left pane)
+  showing context-sensitive **scene or figure** options.
+- [ ] Refactor dashboard domain/routes/templates for scene CRUD, figure-in-scene CRUD/binding (preserving ADR-027
+  location scoping), batched layout persistence, and multi-chart rendering (independent Plotly instances, per-figure
+  range/config).
+- [ ] Add a **vendored, no-build** frontend grid/windowing dependency under `static/vendor/` (license documented) and
+  adopt a hybrid interaction model (HTMX/server-rendered structure & forms + client-managed grid/layout callbacks);
+  keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**.
+- [ ] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions, layout
+  payloads), and backup/restore notes for v2 state.
+
+**Exit criteria**
+
+- [ ] Existing v1 `state.json` migrates to v2 without losing figure bindings/config; restart and restore behave correctly.
+- [ ] Users can create/select/rename/delete personal and shared scenes; scene contents and selection persist.
+- [ ] Multiple figures render concurrently in a scene; drag/resize/snap layout persists and restores.
+- [ ] Options pane reflects the selected figure or scene and enforces edit permissions (`DASHBOARD_SHARED_EDITORS`).
+- [ ] Location/analyte binding, range bucketing, and `DASHBOARD_MAX_POINTS`/read limits remain correct per figure.
+- [ ] Dashboard container still has no `POSTGRES_*` env vars; no DB schema/roles added; no read-API write routes.
+- [ ] `state.json` (v2) backup and restore tested; unit tests and lint pass.
+
 ## Global acceptance criteria (v1)
 
 | Criterion | Target |

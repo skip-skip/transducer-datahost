@@ -39,6 +39,10 @@ Out of scope for v1:
 - Automated/scheduled uploads (uploads are manual in v1).
 - Direct analyst SQL access to PostgreSQL.
 
+> **Planned dashboard redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
+> context-sensitive options pane are prepared in [docs/dashboard-scenes.md](docs/dashboard-scenes.md) (state v2,
+> no database/read-API boundary changes). See [docs/roadmap.md](docs/roadmap.md) Phase 9.
+
 ## Architecture at a glance
 
 Only Caddy publishes a port. PostgreSQL, the ingest API, the worker, the read API, and the

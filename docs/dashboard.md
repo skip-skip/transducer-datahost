@@ -5,6 +5,13 @@ adds no database tables, no database role, and no write routes to the API.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
+> **Planned update (scenes redesign):** this document describes the **current** single-figure dashboard
+> (`state.json` `version: 1`). A planned redesign introduces **scenes** (flat containers of figures), a
+> multi-figure grid workspace with snapping panels, and a context-sensitive options pane. Implementation
+> preparation, target state shape, migration, and techstack changes are captured in
+> [dashboard-scenes.md](dashboard-scenes.md). Boundaries remain the same (no DB schema/roles, no dashboard
+> state in PostgreSQL, no read-API writes, read-API-token auth).
+
 ## 1. Topology
 
 ```text
