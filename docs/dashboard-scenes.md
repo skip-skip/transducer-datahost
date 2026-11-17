@@ -188,8 +188,8 @@ Sketch of the current shape:
    resize handling, and debounced layout saves in `app.js`; three-pane/grid/panel/collapse styling in `app.css`.
 5. **Settings/config (done):** added `DASHBOARD_MAX_FIGURES_PER_SCENE` (default 50, positive-value validation) as the
    only new setting; grid defaults stay code-level constants to minimize deployment/config churn.
-6. **Verification (partial):** unit tests cover migration, operations, routes, permissions, and layout payloads.
-   **Pending:** manual browser checks (drag/resize/snap persistence, restart/restore) and performance sanity with
+6. **Verification (partial):** unit tests cover migration, operations, routes, permissions, layout payloads, app restart,
+   and v2 backup restore. **Pending:** manual browser checks (drag/resize/snap persistence) and performance sanity with
    representative scene sizes.
 
 ## 8. Security, permissions, and ops considerations

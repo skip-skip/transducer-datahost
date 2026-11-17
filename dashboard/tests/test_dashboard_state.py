@@ -71,6 +71,46 @@ def test_roundtrip_and_backup(tmp_path) -> None:
     assert not (tmp_path / "state.json.tmp").exists()
 
 
+def test_v2_backup_restores_previous_document(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+
+    def add_scene(scene_id: str, name: str):
+        def operation(data):
+            data["shared"]["scenes"].append(
+                {
+                    "id": scene_id,
+                    "name": name,
+                    "position": 0,
+                    "grid": {"cols": 12, "row_height": 220},
+                    "figures": [],
+                    "created_by": "alice",
+                    "created_at": "2026-01-01T00:00:00Z",
+                    "updated_at": "2026-01-01T00:00:00Z",
+                }
+            )
+
+        return operation
+
+    store.mutate(add_scene("first", "First"))
+    store.mutate(add_scene("second", "Second"))
+
+    backup = json.loads(
+        (tmp_path / "state.json.bak").read_text(encoding="utf-8")
+    )
+    assert backup["version"] == STATE_VERSION
+    assert [scene["id"] for scene in backup["shared"]["scenes"]] == ["first"]
+
+    # Restore the previous document as an operator would while the service is
+    # stopped, then start a fresh store on the same directory.
+    (tmp_path / "state.json").write_text(json.dumps(backup), encoding="utf-8")
+
+    restored = StateStore(tmp_path).load()
+    assert restored == backup
+    assert restored["version"] == STATE_VERSION
+    assert [scene["id"] for scene in restored["shared"]["scenes"]] == ["first"]
+
+
 def test_rejects_invalid_json(tmp_path) -> None:
     store = StateStore(tmp_path)
     store.ensure()

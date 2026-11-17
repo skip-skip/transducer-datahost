@@ -222,13 +222,13 @@ Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/d
 
 **Exit criteria**
 
-- [ ] Existing v1 `state.json` migrates to v2 without losing figure bindings/config; restart and restore behave correctly.
+- [x] Existing v1 `state.json` migrates to v2 without losing figure bindings/config; restart and restore behave correctly.
 - [x] Users can create/select/rename/delete personal and shared scenes; scene contents and selection persist.
 - [ ] Multiple figures render concurrently in a scene; drag/resize/snap layout persists and restores.
 - [x] Options pane reflects the selected figure or scene and enforces edit permissions (`DASHBOARD_SHARED_EDITORS`).
 - [x] Location/analyte binding, range bucketing, and `DASHBOARD_MAX_POINTS`/read limits remain correct per figure.
 - [x] Dashboard container still has no `POSTGRES_*` env vars; no DB schema/roles added; no read-API write routes.
-- [ ] `state.json` (v2) backup and restore tested; unit tests and lint pass.
+- [x] `state.json` (v2) backup and restore tested; unit tests and lint pass.
 
 ## Global acceptance criteria (v1)
 

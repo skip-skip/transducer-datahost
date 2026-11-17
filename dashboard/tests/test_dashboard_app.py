@@ -1,4 +1,5 @@
 import json
+import re
 
 import pytest
 from fastapi.testclient import TestClient
@@ -173,6 +174,16 @@ def find_scene(tmp_path, scene_id, scope="personal", label="alice"):
 def find_figure(tmp_path, scene_id, figure_id, scope="personal", label="alice"):
     scene = find_scene(tmp_path, scene_id, scope, label)
     return next(figure for figure in scene["figures"] if figure["id"] == figure_id)
+
+
+def panel_html(page_text: str, figure_id: str) -> str:
+    match = re.search(
+        rf'<div class="grid-stack-item"[^>]*gs-id="{re.escape(figure_id)}".*?</article>',
+        page_text,
+        re.DOTALL,
+    )
+    assert match is not None, f"panel for {figure_id} not found"
+    return match.group(0)
 
 
 def create_scene(
@@ -662,6 +673,57 @@ def test_save_scene_layout_persists_positions(client: TestClient, tmp_path) -> N
         "w": 6,
         "h": 2,
     }
+
+
+def test_layout_and_selection_survive_app_restart(tmp_path) -> None:
+    app = create_app(make_settings(tmp_path), FakeReadClient())
+    with TestClient(app) as test_client:
+        login(test_client)
+        scene = create_scene(test_client, tmp_path)
+        first = create_figure(test_client, tmp_path, scene)
+        second = create_figure(test_client, tmp_path, scene)
+
+        saved = test_client.post(
+            f"/scenes/personal/{scene['id']}/layout",
+            json={
+                "figures": [
+                    {"id": first["id"], "x": 6, "y": 4, "w": 6, "h": 3},
+                    {"id": second["id"], "x": 0, "y": 0, "w": 6, "h": 2},
+                ]
+            },
+        )
+        assert saved.status_code == 204
+
+        selected = test_client.post(
+            "/ui/select",
+            data={
+                "scope": "personal",
+                "scene_id": scene["id"],
+                "figure_id": first["id"],
+            },
+            follow_redirects=False,
+        )
+        assert selected.status_code == 303
+
+    restarted = create_app(make_settings(tmp_path), FakeReadClient())
+    with TestClient(restarted) as test_client:
+        login(test_client)
+        page = test_client.get("/")
+        assert page.status_code == 200
+
+        first_panel = panel_html(page.text, first["id"])
+        assert 'gs-x="6"' in first_panel
+        assert 'gs-y="4"' in first_panel
+        assert 'gs-w="6"' in first_panel
+        assert 'gs-h="3"' in first_panel
+        assert "figure-panel active" in first_panel
+
+        second_panel = panel_html(page.text, second["id"])
+        assert 'gs-x="0"' in second_panel
+        assert 'gs-y="0"' in second_panel
+        assert 'gs-w="6"' in second_panel
+        assert 'gs-h="2"' in second_panel
+        assert "figure-panel active" not in second_panel
 
 
 def test_save_scene_layout_rejects_bad_payload(client: TestClient, tmp_path) -> None:
