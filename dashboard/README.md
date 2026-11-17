@@ -7,9 +7,9 @@ forwards that token on every data request.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
-> **Planned redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
-> context-sensitive options pane are in progress (no DB/read-API boundary changes). The scene list, options pane, and
-> grid rendering have landed; drag/resize/snap and batched layout saves remain. See
+> **Scenes redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
+> context-sensitive options pane have shipped (no DB/read-API boundary changes). GridStack.js 14.1.1 is vendored under
+> `static/vendor/` with its MIT license; layout changes autosave in debounced batches. See
 > [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current implementation.
 
 ## State
@@ -25,10 +25,12 @@ contains:
 
 The dashboard now renders the selected scene's figures as panels in a CSS grid
 using each figure's stored `layout`. The left pane lists scenes, and a nested
-options pane edits the selected scene or figure. Drag, resize, snap-to-grid, and
-batched layout persistence are the remaining Phase 9 work. Version 1 documents
-are migrated on first load into a default scene per scope/owner, validated, and
-written through the normal atomic path (`state.json.bak` keeps the old file).
+options pane edits the selected scene or figure. Panels drag by their grip,
+resize, and snap to grid cells using the vendored GridStack.js library; layout
+changes autosave after a short debounce as one batch per scene. Version 1
+documents are migrated on first load into a default scene per scope/owner,
+validated, and written through the normal atomic path (`state.json.bak` keeps the
+old file).
 
 Writes take a file lock, fsync a temporary file, copy the previous version to
 `state.json.bak`, and atomically replace `state.json`. The container runs one

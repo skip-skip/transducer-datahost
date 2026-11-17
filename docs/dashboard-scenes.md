@@ -1,9 +1,9 @@
 # Dashboard scenes redesign
 
-> **Status:** In progress. The state layer (version 2 scenes schema, validation, and v1 → v2 migration) and the
-> server-rendered scene shell (scene list, options pane, CSS-grid workspace, scene-aware routes) have landed. Drag,
-> resize, snap-to-grid, and batched layout persistence remain. This document records the implementation plan and current
-> progress.
+> **Status:** Implemented. The state layer (version 2 scenes schema, validation, and v1 → v2 migration), the
+> server-rendered scene shell (scene list, options pane, grid workspace, scene-aware routes), and the GridStack
+> drag/resize/snap workspace with debounced batched layout persistence have landed. Remaining: manual browser and
+> performance verification, plus any follow-up decisions captured in §9.
 > Current shipped behavior is documented in [dashboard.md](dashboard.md). Implementers should keep this document
 > updated as decisions are finalized.
 
@@ -30,29 +30,29 @@ read-only API.
   per-figure layout, plus per-scope UI selection/collapse. The version 1 layout
   (`shared.figures[]`, `personal[label].figures[]`) migrates to a default scene on load.
 - UI: three regions. The left pane lists scenes; the nested options pane edits the selected scene or figure; the main
-  workspace renders every figure in the selected scene as a panel in a CSS grid using its stored `layout`. Charts load
-  per panel through HTMX and render as independent Plotly instances (`app.js`). Drag/resize/snap and batched layout saves
-  are not built yet.
+  workspace renders every figure in the selected scene as a GridStack panel using its stored `layout`. Panels can be
+  dragged by their grip, resized, and snap to grid cells; layout changes are debounced and saved in one batch per scene.
+  Charts load per panel through HTMX and render as independent Plotly instances (`app.js`).
 - Figure identity/binding: UUID id, `series_id`, optional `location_id` (ADR-027), per-figure config; permissions are
   personal-vs-shared with optional `DASHBOARD_SHARED_EDITORS`.
 
 See [dashboard.md](dashboard.md), `dashboard/transducer_dashboard/{app,figures,state}.py`, templates, and static assets.
 
-## 3. Planned UX model
+## 3. UX model
 
-| Region | Planned behavior |
+| Region | Behavior |
 |---|---|
 | **Left pane (scenes)** | Lists **scenes** (replacing the flat figure list). Scope remains personal/shared. Selecting a scene opens its grid workspace. Scene-level actions (create/rename/delete/select) live here or via options. |
 | **Grid workspace (center)** | Shows all figures in the selected scene as panels/windows on a grid. Panels can be moved/resized and **snap** to grid positions/sizes. Selecting a panel focuses it. Each panel renders its own chart/data state. |
 | **Options pane (nested, right of left pane)** | Context-sensitive: shows **scene options** when a scene (or no figure) is selected, and **figure options** when a figure panel is selected. Collapsible; selection/collapse persisted per user where appropriate. |
 
-### Figure-as-window (expected capabilities)
+### Figure-as-window (capabilities)
 - Bind data like today: name, location, analyte (`series_id`), optional `location_id`, range/display config.
 - Independent chart rendering within the scene (multiple Plotly instances).
 - Layout fields persisted per figure instance in the scene: e.g. grid `x`, `y`, `w`, `h` (and min constraints) so the
   workspace restores on reload.
 
-### Scene (expected capabilities)
+### Scene (capabilities)
 - Container: id, name, scope/ownership, ordered/positioned figure set, grid/layout settings (column count, row height or
   equivalent), timestamps/creator metadata.
 - Flat hierarchy only (no scenes inside scenes).
@@ -72,9 +72,8 @@ See [dashboard.md](dashboard.md), `dashboard/transducer_dashboard/{app,figures,s
   validation (see §5). Refactor/replace `figures.py` with scene-aware domain operations.
 - **App/routes/templates:** scene-aware navigation and mutations; grid workspace template; options-pane partials/forms;
   endpoints for layout persistence and multi-figure data loading (see §7).
-- **Frontend interaction (primary stack addition):** add a **vendored, no-build JavaScript grid/windowing library** to
-  provide drag, resize, and snap-to-grid behavior (candidate to evaluate during implementation: e.g. GridStack.js or a
-  comparable library; final choice must be license-compatible and vendorable under `static/vendor/`).
+- **Frontend interaction (implemented):** **GridStack.js 14.1.1** (MIT) is vendored under `static/vendor/` with its
+  license notice. It provides drag, resize, and snap-to-grid; the dashboard keeps a no-build, no-bundler setup.
 - **Client JS/CSS:** evolve `app.js`/`app.css` (or split static modules, still no bundler) for multi-chart lifecycle
   (`Plotly.newPlot`/`react`/`purge`, resize handling), focus/selection, and debounced layout-save requests.
 - **Interaction style:** hybrid — HTMX/server-rendered for structure, forms, and CRUD navigation where appropriate;
@@ -87,8 +86,7 @@ See [dashboard.md](dashboard.md), `dashboard/transducer_dashboard/{app,figures,s
 
 ## 5. State schema and migration
 
-> The version 2 state layer and the scene-aware routes/shell are implemented. Grid interactions (drag/resize/snap) and
-> batched layout persistence are still planned.
+> The version 2 state layer, scene-aware routes/shell, and batched layout persistence are implemented.
 
 ### 5.1 Implemented v2 shape
 - **Scene:** `id` (UUID), `name`, `position`, `grid` (`cols`, `row_height`), `figures[]`,
@@ -163,9 +161,10 @@ Sketch of the current shape:
 - Preserve ADR-027 semantics: figures with `location_id: null` remain valid/unscoped until edited.
 - Write migrated state through the normal atomic path; retain `state.json.bak`. Validate strictly after migration.
 
-### 5.3 Write behavior
-- Support **batched layout updates** (single payload for drag/resize end or debounce window) to limit write frequency.
-- Maintain one writer (`uvicorn` worker = 1) and existing lock/atomic guarantees.
+### 5.3 Write behavior (implemented)
+- Layout changes are debounced client-side (500 ms) and sent as one batch to `POST /scenes/{scope}/{scene_id}/layout`;
+  the endpoint validates every figure id and grid bound before writing.
+- One writer (`uvicorn` worker = 1) and the existing lock/atomic guarantees remain unchanged.
 
 ## 6. Read API impact
 
@@ -182,35 +181,39 @@ Sketch of the current shape:
 1. **State/domain (done):** `state.py` v2 schema + migration + validation; scene/figure/layout operations in
    `figures.py`, permission checks, ID generation.
 2. **Routes/app (done):** scene CRUD/select, figure CRUD within scene, figure/scene options partials, chart partial,
-   context-sensitive options resolution. **Pending:** layout save endpoint and batched persistence.
+   batched layout save endpoint, context-sensitive options resolution.
 3. **Templates (done):** `index.html` shell (scenes pane, options pane, grid), scene list partial, figure panel
    template, scene-options and figure-options partials; accessible labels and HTMX targets preserved.
-4. **Static assets (partial):** multi-chart registry, range toggle, and resize handling in `app.js`; three-pane/grid/
-   panel/collapse styling in `app.css`. **Pending:** vendor a grid library with license notice and wire drag/resize/snap.
+4. **Static assets (done):** vendored GridStack.js 14.1.1 with license notice; multi-chart registry, range toggle,
+   resize handling, and debounced layout saves in `app.js`; three-pane/grid/panel/collapse styling in `app.css`.
 5. **Settings/config:** only add env vars if truly required (e.g. grid defaults/limits); prefer safe defaults to minimize
    deployment/config churn.
-6. **Verification (partial):** unit tests cover migration, operations, routes, and permissions. **Pending:** manual
-   browser checks (drag/resize/snap persistence, restart/restore) and performance sanity with representative scene sizes.
+6. **Verification (partial):** unit tests cover migration, operations, routes, permissions, and layout payloads.
+   **Pending:** manual browser checks (drag/resize/snap persistence, restart/restore) and performance sanity with
+   representative scene sizes.
 
 ## 8. Security, permissions, and ops considerations
 
-- Preserve session cookie properties and security headers; CSP may need adjustment if a vendored library requires it
-  (prefer libraries compatible with current self-only/static policy).
-- Shared-scene edit rules must be explicit (align with `DASHBOARD_SHARED_EDITORS`); read-only viewers must not mutate
-  layout or bindings.
-- Layout-save endpoints must validate ownership/scope and input bounds (grid coordinates/sizes, figure ids).
-- Backup/restore guidance unchanged in mechanism but state files will grow with multi-figure scenes; document v2 restore
-  expectations.
+- Session cookie properties and security headers are unchanged. The vendored GridStack assets fit the existing
+  self-only CSP: scripts/styles are served from `/static`, inline style attributes are already allowed by
+  `style-src 'unsafe-inline'`, and the resize-handle SVGs use `data:` images allowed by `img-src`.
+- Shared-scene edit rules align with `DASHBOARD_SHARED_EDITORS`; read-only viewers get a disabled grid and cannot mutate
+  layout or bindings (enforced again by the layout-save endpoint).
+- The layout-save endpoint validates ownership/scope, figure membership, duplicate ids, and grid bounds.
+- Backup/restore guidance is unchanged in mechanism; state files grow with multi-figure scenes, and v2 restore
+  expectations are documented in [dashboard.md](dashboard.md).
 
-## 9. Decisions to finalize before/during implementation
+## 9. Decisions
 
-- **Sharing granularity:** scene as the shareable/editable unit (recommended) vs other models.
-- **Grid library choice:** capability, size, license, accessibility, and vendoring practicality.
-- **Save UX:** autosave-on-change (debounced) vs explicit save for layout/config.
-- **Grid definition:** column count, responsive breakpoints, row height, min panel sizes, behavior on small screens.
-- **Scene open behavior:** eager load all charts vs lazy/lazy-on-visible.
-- **v1 → v2 default scene mapping:** exact transformation and naming.
-- **Figure caps:** maximum figures per scene / concurrent chart renders for performance safety.
+- **Sharing granularity:** the scene is the shareable/editable unit; figures belong to exactly one scene.
+- **Grid library:** GridStack.js 14.1.1 (MIT), vendored under `static/vendor/`; drag handle is the panel grip.
+- **Save UX:** layout autosaves on drag/resize end, debounced (500 ms) and batched per scene. Binding/config edits keep
+  explicit save in the options pane.
+- **Grid definition:** scene-level column count (default 12) and row height (default 220 px), minimum panel size 2×1
+  cells, vertical compaction (`float: false`), and a horizontal-scroll workspace on small screens.
+- **Scene open behavior:** charts load eagerly per panel through HTMX; per-panel errors stay isolated.
+- **v1 → v2 default scene mapping:** one `Default scene` per scope/owner with non-overlapping layouts (implemented).
+- **Open:** figure caps / concurrent chart renders for performance safety.
 
 ## 10. References
 

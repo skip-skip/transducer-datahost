@@ -18,6 +18,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
+from pydantic import BaseModel
 
 from . import figures as figure_ops
 from .figures import (
@@ -43,6 +44,18 @@ DEFAULT_RANGE = "7d"
 
 class NotAuthenticated(Exception):
     pass
+
+
+class LayoutItem(BaseModel):
+    id: str
+    x: int
+    y: int
+    w: int
+    h: int
+
+
+class LayoutPayload(BaseModel):
+    figures: list[LayoutItem]
 
 
 @dataclass(frozen=True)
@@ -568,6 +581,36 @@ def create_app(
         except FigureError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
         return redirect(request)
+
+    @app.post("/scenes/{scope}/{scene_id}/layout", name="save_scene_layout")
+    def save_scene_layout(
+        scope: str,
+        scene_id: str,
+        payload: LayoutPayload,
+        session: Session = Depends(require_session),
+    ) -> Response:
+        if scope not in SCOPES:
+            raise HTTPException(status_code=400, detail="unknown scope")
+        if not payload.figures:
+            raise HTTPException(status_code=400, detail="no layouts provided")
+        try:
+            store.mutate(
+                lambda state: figure_ops.update_scene_layouts(
+                    state,
+                    scope,
+                    session.label,
+                    settings.shared_editors,
+                    scene_id,
+                    [item.model_dump() for item in payload.figures],
+                )
+            )
+        except (SceneNotFound, FigureNotFound) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+        except FigurePermissionError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+        except FigureError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return Response(status_code=204)
 
     @app.post("/scenes/{scope}/{scene_id}/delete", name="delete_scene")
     def delete_scene(

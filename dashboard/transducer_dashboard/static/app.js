@@ -59,9 +59,105 @@
     });
   }
 
-  document.addEventListener("DOMContentLoaded", function () { renderAll(document); });
+  function setGridStatus(element, message, isError) {
+    var pane = element.parentElement;
+    var status = pane ? pane.querySelector("[data-grid-status]") : null;
+    if (!status) {
+      return;
+    }
+    status.textContent = message;
+    status.classList.toggle("error", Boolean(isError));
+  }
+
+  function saveGridLayout(grid) {
+    var element = grid.el;
+    var url = element.dataset.layoutUrl;
+    if (!url) {
+      return;
+    }
+
+    var payload = {
+      figures: grid.save(false).map(function (node) {
+        return { id: node.id, x: node.x, y: node.y, w: node.w, h: node.h };
+      })
+    };
+
+    fetch(url, {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    }).then(function (response) {
+      if (!response.ok) {
+        throw new Error("layout save failed with " + response.status);
+      }
+      setGridStatus(element, "Layout saved", false);
+    }).catch(function () {
+      setGridStatus(element, "Could not save layout", true);
+    });
+  }
+
+  var layoutTimers = new WeakMap();
+
+  function scheduleLayoutSave(grid) {
+    var element = grid.el;
+    var pending = layoutTimers.get(element);
+    if (pending) {
+      window.clearTimeout(pending);
+    }
+    setGridStatus(element, "Saving layout\u2026", false);
+    layoutTimers.set(element, window.setTimeout(function () {
+      layoutTimers.delete(element);
+      saveGridLayout(grid);
+    }, 500));
+  }
+
+  function initGrid(element) {
+    if (element.gridstack || typeof GridStack === "undefined") {
+      return;
+    }
+
+    var cols = parseInt(element.dataset.gridCols, 10);
+    var rowHeight = parseInt(element.dataset.rowHeight, 10);
+    var editable = element.dataset.canEdit === "true";
+
+    var grid = GridStack.init({
+      column: cols || 12,
+      cellHeight: rowHeight || 220,
+      margin: 6,
+      float: false,
+      handle: ".panel-grip",
+      disableDrag: !editable,
+      disableResize: !editable
+    }, element);
+
+    grid.on("change", function () {
+      if (editable) {
+        scheduleLayoutSave(grid);
+      }
+    });
+
+    grid.on("resizestop", function (_event, item) {
+      var plot = item.querySelector(".plot");
+      if (plot && typeof Plotly !== "undefined") {
+        Plotly.Plots.resize(plot);
+      }
+    });
+  }
+
+  function initGrids(root) {
+    var scope = root && root.querySelectorAll ? root : document;
+    var grids = scope.querySelectorAll(".scene-grid");
+    Array.prototype.forEach.call(grids, initGrid);
+  }
+
+  document.addEventListener("DOMContentLoaded", function () {
+    initGrids(document);
+    renderAll(document);
+  });
 
   document.body.addEventListener("htmx:afterSwap", function (event) {
+    initGrids(event.target);
     renderAll(event.target);
   });
 

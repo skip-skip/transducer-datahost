@@ -281,6 +281,52 @@ def update_scene(
     return scene
 
 
+def update_scene_layouts(
+    state: dict[str, Any],
+    scope: str,
+    label: str,
+    shared_editors: frozenset[str],
+    scene_id: str,
+    layouts: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Apply a batch of figure layouts, validating every entry before saving."""
+
+    if not can_edit(scope, label, shared_editors):
+        raise FigurePermissionError("this token may not edit shared scenes")
+
+    scene = get_scene(state, scope, label, scene_id)
+    if scene is None:
+        raise SceneNotFound("scene not found")
+    if not isinstance(layouts, list):
+        raise FigureError("layouts must be a list")
+
+    cols = scene.get("grid", {}).get("cols", DEFAULT_GRID_COLS)
+    by_id = {
+        figure.get("id"): figure
+        for figure in scene.get("figures", [])
+        if isinstance(figure.get("id"), str)
+    }
+    validated: dict[str, dict[str, int]] = {}
+    for item in layouts:
+        if not isinstance(item, dict):
+            raise FigureError("layout item must be an object")
+        figure_id = item.get("id")
+        if not isinstance(figure_id, str) or figure_id not in by_id:
+            raise FigureNotFound("figure not found")
+        if figure_id in validated:
+            raise FigureError("duplicate figure id in layout payload")
+        validated[figure_id] = _validated_layout(item, cols)
+
+    now = _now()
+    for figure_id, layout in validated.items():
+        figure = by_id[figure_id]
+        figure["layout"] = layout
+        figure["updated_at"] = now
+    if validated:
+        scene["updated_at"] = now
+    return scene
+
+
 def delete_scene(
     state: dict[str, Any],
     scope: str,

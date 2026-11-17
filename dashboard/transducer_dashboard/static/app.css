@@ -198,12 +198,15 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
 .expand-scenes { top: 0.75rem; left: 0.75rem; }
 .expand-options { top: 0.75rem; right: 0.75rem; }
 
+.grid-status { margin: 0 0 0.4rem; min-height: 1.1rem; }
+.grid-status.error { color: var(--danger); }
+
 .scene-grid {
-  display: grid;
-  gap: 0.75rem;
-  align-items: stretch;
-  min-width: 0;
+  min-width: 720px;
+  min-height: 120px;
 }
+
+.scene-grid .grid-stack-item-content { overflow: hidden; }
 
 .scene-empty { margin-top: 1rem; }
 
@@ -213,6 +216,7 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
   border-radius: 10px;
   display: flex;
   flex-direction: column;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -234,6 +238,18 @@ input:disabled, select:disabled { background: #f1f2f4; color: var(--muted); }
 }
 
 .panel-header form { flex: 1; min-width: 0; }
+
+.panel-grip {
+  color: var(--muted);
+  cursor: grab;
+  flex-shrink: 0;
+  font-size: 0.75rem;
+  letter-spacing: -0.15em;
+  line-height: 1;
+  user-select: none;
+}
+
+.panel-grip:active { cursor: grabbing; }
 
 .panel-title {
   border: none;

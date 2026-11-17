@@ -249,6 +249,93 @@ def test_update_scene_figure_layout_is_validated() -> None:
         )
 
 
+def test_update_scene_layouts_applies_batch() -> None:
+    state = default_state()
+    scene = figures.create_scene(state, "personal", "alice", NO_EDITORS)
+    first = figures.create_scene_figure(
+        state, "personal", "alice", NO_EDITORS, scene["id"]
+    )
+    second = figures.create_scene_figure(
+        state, "personal", "alice", NO_EDITORS, scene["id"]
+    )
+
+    updated = figures.update_scene_layouts(
+        state,
+        "personal",
+        "alice",
+        NO_EDITORS,
+        scene["id"],
+        [
+            {"id": first["id"], "x": 6, "y": 0, "w": 6, "h": 3},
+            {"id": second["id"], "x": 0, "y": 0, "w": 6, "h": 2},
+        ],
+    )
+
+    layouts = {figure["id"]: figure["layout"] for figure in updated["figures"]}
+    assert layouts[first["id"]] == {"x": 6, "y": 0, "w": 6, "h": 3}
+    assert layouts[second["id"]] == {"x": 0, "y": 0, "w": 6, "h": 2}
+
+
+def test_update_scene_layouts_validates_every_entry() -> None:
+    state = default_state()
+    scene = figures.create_scene(state, "personal", "alice", NO_EDITORS)
+    figure = figures.create_scene_figure(
+        state, "personal", "alice", NO_EDITORS, scene["id"]
+    )
+
+    with pytest.raises(figures.FigureError, match="extends past 12"):
+        figures.update_scene_layouts(
+            state,
+            "personal",
+            "alice",
+            NO_EDITORS,
+            scene["id"],
+            [{"id": figure["id"], "x": 10, "y": 0, "w": 6, "h": 2}],
+        )
+    with pytest.raises(figures.FigureNotFound, match="figure not found"):
+        figures.update_scene_layouts(
+            state,
+            "personal",
+            "alice",
+            NO_EDITORS,
+            scene["id"],
+            [{"id": "missing", "x": 0, "y": 0, "w": 6, "h": 2}],
+        )
+    with pytest.raises(figures.FigureError, match="duplicate"):
+        figures.update_scene_layouts(
+            state,
+            "personal",
+            "alice",
+            NO_EDITORS,
+            scene["id"],
+            [
+                {"id": figure["id"], "x": 0, "y": 0, "w": 6, "h": 2},
+                {"id": figure["id"], "x": 6, "y": 0, "w": 6, "h": 2},
+            ],
+        )
+
+    assert figure["layout"] == {"x": 0, "y": 0, "w": 6, "h": 2}
+
+
+def test_update_scene_layouts_requires_edit_permission() -> None:
+    state = default_state()
+    editors = frozenset({"alice"})
+    scene = figures.create_scene(state, "shared", "alice", editors)
+    figure = figures.create_scene_figure(
+        state, "shared", "alice", editors, scene["id"]
+    )
+
+    with pytest.raises(figures.FigurePermissionError):
+        figures.update_scene_layouts(
+            state,
+            "shared",
+            "bob",
+            editors,
+            scene["id"],
+            [{"id": figure["id"], "x": 6, "y": 0, "w": 6, "h": 2}],
+        )
+
+
 def test_update_scene_grid_fits_existing_layouts() -> None:
     state = default_state()
     scene = figures.create_scene(state, "personal", "alice", NO_EDITORS)

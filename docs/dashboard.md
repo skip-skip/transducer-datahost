@@ -5,11 +5,11 @@ adds no database tables, no database role, and no write routes to the API.
 
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
-> **Scenes redesign (in progress):** this document describes the current dashboard. Its state is `state.json`
-> `version: 2`, which stores scenes (flat containers of figures) with per-figure grid layouts. The scene list, nested
-> options pane, and CSS-grid workspace have shipped; drag/resize/snap and batched layout persistence remain. Preparation,
-> target state shape, migration, and techstack details are in [dashboard-scenes.md](dashboard-scenes.md). Boundaries
-> remain the same (no DB schema/roles, no dashboard state in PostgreSQL, no read-API writes, read-API-token auth).
+> **Scenes redesign:** this document describes the current dashboard. Its state is `state.json` `version: 2`, which
+> stores scenes (flat containers of figures) with per-figure grid layouts. The scene list, nested options pane, grid
+> workspace with drag/resize/snap, and batched layout persistence have shipped. Preparation, target state shape,
+> migration, and techstack details are in [dashboard-scenes.md](dashboard-scenes.md). Boundaries remain the same (no DB
+> schema/roles, no dashboard state in PostgreSQL, no read-API writes, read-API-token auth).
 
 ## 1. Topology
 
@@ -59,8 +59,8 @@ State is one JSON file on the `dashboard_state` volume. It is deliberately not
 in PostgreSQL. Version 2 organizes figures into **scenes**: flat containers with
 grid settings and a layout for each figure. The UI lists scenes, edits the
 selected scene or figure in the options pane, and renders the selected scene's
-figures as panels in a grid workspace. Drag/resize/snap persistence is the
-remaining Phase 9 work ([dashboard-scenes.md](dashboard-scenes.md)).
+figures as panels in a grid workspace. Dragging or resizing a panel updates its
+stored layout through a debounced batched save.
 
 ```json
 {
@@ -179,15 +179,20 @@ Grid workspace (main):
 
 - Uses the scene's `cols` and `row_height` to place figures in their stored
   `layout` cells.
-- Each figure is a panel with a title/select control, range buttons, and its own
-  chart. Panels load charts independently through HTMX, so one failing figure
-  does not block the rest.
+- Each figure is a panel with a drag grip, title/select control, range buttons,
+  and its own chart. Panels load charts independently through HTMX, so one
+  failing figure does not block the rest.
+- Panels drag by their grip, resize from the lower-right handle, and snap to grid
+  cells (GridStack.js 14.1.1, vendored under `static/vendor/` with its MIT
+  license). The grid compacts vertically.
+- Layout changes autosave after a 500 ms debounce as one batched request to
+  `POST /scenes/{scope}/{scene_id}/layout`; the status line above the grid reports
+  success or failure. Read-only shared views disable drag and resize.
 - Range buttons (`24h`, `7d`, `30d`) refresh only that panel; charts use
   server-side bucketing.
 - Multiple Plotly charts render independently on one page.
-- Drag, resize, and snap-to-grid are **not implemented yet**; they are the next
-  Phase 9 slice. Layout currently comes from stored state and scene grid
-  settings.
+- The workspace scrolls horizontally on narrow screens instead of reflowing
+  panels, so stored grid positions stay meaningful.
 
 A new figure starts with a default name, no series, and the next free grid slot.
 Saving rejects a series that does not exist and a location/series pair with no
@@ -285,12 +290,16 @@ safe.
 ## 8. Verification
 
 1. Log in with a valid read token; an invalid token is rejected.
-2. Create a personal figure, a shared figure, rename, change location/analyte,
-   change range, and delete. Pick a well whose logger also served another
-   location and confirm the chart excludes the other deployments.
-3. Restart the dashboard container; figures and selected state survive.
-4. Log in with a second token: shared figures are visible, the first user's
-   personal figures are not.
+2. Create personal and shared scenes; rename/delete scenes, add figures, rename
+   figures, change location/analyte, change range, and delete figures. Pick a
+   well whose logger also served another location and confirm the chart excludes
+   the other deployments.
+3. Drag a panel by its grip and resize it from the lower-right handle; reload and
+   confirm the layout was saved. Restart the dashboard container; scenes,
+   figures, layouts, and selected state survive.
+4. Log in with a second token: shared scenes are visible, the first user's
+   personal scenes are not, and read-only shared scenes cannot be dragged or
+   resized.
 5. `docker compose exec dashboard env` shows no `POSTGRES_*` variables.
 6. Rotate a read token; the old session returns to login on the next API call.
 7. Confirm a 30-day high-frequency chart returns at most `DASHBOARD_MAX_POINTS`

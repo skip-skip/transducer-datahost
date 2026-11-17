@@ -208,7 +208,15 @@ def test_health_is_public(client: TestClient) -> None:
 
 
 def test_static_assets_are_served(client: TestClient) -> None:
-    for path in ("app.css", "app.js", "vendor/htmx.min.js", "vendor/plotly.min.js"):
+    for path in (
+        "app.css",
+        "app.js",
+        "vendor/htmx.min.js",
+        "vendor/plotly.min.js",
+        "vendor/gridstack-all.js",
+        "vendor/gridstack.min.css",
+        "vendor/gridstack-all.js.LICENSE.txt",
+    ):
         response = client.get(f"/static/{path}")
         assert response.status_code == 200, path
         assert response.headers["content-type"].startswith("text/") or path.endswith(
@@ -282,8 +290,10 @@ def test_create_scene_and_figure(client: TestClient, tmp_path) -> None:
     assert page.status_code == 200
     assert "Well field" in page.text
     assert "Untitled figure" in page.text
-    assert 'class="scene-grid"' in page.text
+    assert 'class="scene-grid grid-stack"' in page.text
     assert f'data-scene-id="{scene["id"]}"' in page.text
+    assert f'gs-id="{figure["id"]}"' in page.text
+    assert f"/scenes/personal/{scene['id']}/layout" in page.text
     assert "panel-chart" in page.text
     assert (
         f"/scenes/personal/{scene['id']}/figures/{figure['id']}" in page.text
@@ -572,6 +582,108 @@ def test_select_rejects_figure_from_another_scene(
     )
 
     assert response.status_code == 404
+
+
+def test_save_scene_layout_persists_positions(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path)
+    first = create_figure(client, tmp_path, scene)
+    second = create_figure(client, tmp_path, scene)
+
+    response = client.post(
+        f"/scenes/personal/{scene['id']}/layout",
+        json={
+            "figures": [
+                {"id": first["id"], "x": 6, "y": 4, "w": 6, "h": 3},
+                {"id": second["id"], "x": 0, "y": 0, "w": 6, "h": 2},
+            ]
+        },
+    )
+
+    assert response.status_code == 204
+    assert find_figure(tmp_path, scene["id"], first["id"])["layout"] == {
+        "x": 6,
+        "y": 4,
+        "w": 6,
+        "h": 3,
+    }
+    assert find_figure(tmp_path, scene["id"], second["id"])["layout"] == {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 2,
+    }
+
+
+def test_save_scene_layout_rejects_bad_payload(client: TestClient, tmp_path) -> None:
+    login(client)
+    scene = create_scene(client, tmp_path)
+    figure = create_figure(client, tmp_path, scene)
+
+    out_of_bounds = client.post(
+        f"/scenes/personal/{scene['id']}/layout",
+        json={"figures": [{"id": figure["id"], "x": 8, "y": 0, "w": 6, "h": 2}]},
+    )
+    assert out_of_bounds.status_code == 400
+    assert "extends past" in out_of_bounds.text
+
+    unknown_figure = client.post(
+        f"/scenes/personal/{scene['id']}/layout",
+        json={"figures": [{"id": "missing", "x": 0, "y": 0, "w": 6, "h": 2}]},
+    )
+    assert unknown_figure.status_code == 404
+
+    malformed = client.post(
+        f"/scenes/personal/{scene['id']}/layout",
+        json={"figures": [{"id": figure["id"], "x": 0}]},
+    )
+    assert malformed.status_code == 422
+
+    empty = client.post(
+        f"/scenes/personal/{scene['id']}/layout",
+        json={"figures": []},
+    )
+    assert empty.status_code == 400
+
+    assert find_figure(tmp_path, scene["id"], figure["id"])["layout"] == {
+        "x": 0,
+        "y": 0,
+        "w": 6,
+        "h": 2,
+    }
+
+
+def test_save_scene_layout_rejects_foreign_figure(client: TestClient, tmp_path) -> None:
+    login(client)
+    first_scene = create_scene(client, tmp_path, name="First")
+    second_scene = create_scene(client, tmp_path, name="Second")
+    other_figure = create_figure(client, tmp_path, second_scene)
+
+    response = client.post(
+        f"/scenes/personal/{first_scene['id']}/layout",
+        json={"figures": [{"id": other_figure["id"], "x": 0, "y": 0, "w": 6, "h": 2}]},
+    )
+
+    assert response.status_code == 404
+
+
+def test_save_scene_layout_enforces_shared_edit_permissions(tmp_path) -> None:
+    app = create_app(
+        make_settings(tmp_path, shared_editors=frozenset({"alice"})),
+        FakeReadClient(),
+    )
+    with TestClient(app) as test_client:
+        login(test_client, "good")
+        scene = create_scene(test_client, tmp_path, scope="shared")
+        figure = create_figure(test_client, tmp_path, scene, scope="shared")
+
+        login(test_client, "viewer")
+        response = test_client.post(
+            f"/scenes/shared/{scene['id']}/layout",
+            json={"figures": [{"id": figure["id"], "x": 6, "y": 0, "w": 6, "h": 2}]},
+        )
+
+        assert response.status_code == 403
 
 
 def test_update_scene_grid_and_name(client: TestClient, tmp_path) -> None:

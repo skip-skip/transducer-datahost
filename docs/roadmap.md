@@ -208,25 +208,24 @@ Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/d
   layout (`x`,`y`,`w`,`h`/constraints), scene/grid settings, and per-user UI (selected scene/figure, pane collapse);
   implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety.
 - [x] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace**, and a
-  **nested options pane** (right of the left pane) showing context-sensitive **scene or figure** options. *(Rendering
-  landed; drag/resize/snap still pending.)*
+  **nested options pane** (right of the left pane) showing context-sensitive **scene or figure** options.
 - [x] Refactor dashboard domain/routes/templates for scene CRUD, figure-in-scene CRUD/binding (preserving ADR-027
-  location scoping), and multi-chart rendering (independent Plotly instances, per-figure range). *(Batched layout
-  persistence still pending.)*
-- [ ] Add a **vendored, no-build** frontend grid/windowing dependency under `static/vendor/` (license documented) and
+  location scoping), batched layout persistence, and multi-chart rendering (independent Plotly instances, per-figure
+  range).
+- [x] Add a **vendored, no-build** frontend grid/windowing dependency under `static/vendor/` (license documented) and
   adopt a hybrid interaction model (HTMX/server-rendered structure & forms + client-managed grid/layout callbacks);
-  keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**.
-- [x] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions), and
-  backup/restore notes for v2 state. *(Layout-payload tests follow with the grid interaction slice.)*
+  keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**. *(GridStack.js 14.1.1, MIT.)*
+- [x] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions, layout
+  payloads), and backup/restore notes for v2 state.
 
 **Exit criteria**
 
 - [ ] Existing v1 `state.json` migrates to v2 without losing figure bindings/config; restart and restore behave correctly.
-- [ ] Users can create/select/rename/delete personal and shared scenes; scene contents and selection persist.
+- [x] Users can create/select/rename/delete personal and shared scenes; scene contents and selection persist.
 - [ ] Multiple figures render concurrently in a scene; drag/resize/snap layout persists and restores.
-- [ ] Options pane reflects the selected figure or scene and enforces edit permissions (`DASHBOARD_SHARED_EDITORS`).
-- [ ] Location/analyte binding, range bucketing, and `DASHBOARD_MAX_POINTS`/read limits remain correct per figure.
-- [ ] Dashboard container still has no `POSTGRES_*` env vars; no DB schema/roles added; no read-API write routes.
+- [x] Options pane reflects the selected figure or scene and enforces edit permissions (`DASHBOARD_SHARED_EDITORS`).
+- [x] Location/analyte binding, range bucketing, and `DASHBOARD_MAX_POINTS`/read limits remain correct per figure.
+- [x] Dashboard container still has no `POSTGRES_*` env vars; no DB schema/roles added; no read-API write routes.
 - [ ] `state.json` (v2) backup and restore tested; unit tests and lint pass.
 
 ## Global acceptance criteria (v1)

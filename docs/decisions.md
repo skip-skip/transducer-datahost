@@ -613,7 +613,7 @@ several locations into one chart.
 
 ## ADR-028: Scene-based grid dashboard with versioned JSON state
 
-**Status:** Accepted (state layer and server-rendered scene shell implemented; grid interactions pending)
+**Status:** Accepted (implemented; manual browser/restore verification pending)
 
 **Context:** The current dashboard (ADR-026/027) shows one figure at a time from flat personal/shared lists backed by
 `state.json` `version: 1`. The desired UX is scene-based: scenes (flat containers of figures) listed in the left pane,
@@ -628,9 +628,9 @@ security model:
   per-user scene/selection/pane UI; migrate v1 → v2 deterministically on load/write with validation and atomic/locked
   persistence (extending ADR-026).
 - **UI/techstack:** keep FastAPI + Jinja2 + HTMX + Plotly and the no-Node-build, vendored-assets approach; add a
-  **vendored frontend grid/windowing library** (to be selected, license-compatible) and client-side grid/multi-chart
+  **vendored frontend grid/windowing library** (GridStack.js 14.1.1, MIT) and client-side grid/multi-chart
   management. Use a **hybrid** model: server-rendered/HTMX for structure, forms, and CRUD navigation; client-managed
-  grid interactions with batched layout persistence.
+  grid interactions with debounced, batched layout persistence.
 - **Boundaries:** no new tables/roles/grants or read-API write routes; dashboard remains credentialless to Postgres and
   continues to proxy user read tokens to the read API. Figure-to-data binding continues to follow ADR-027
   (`series_id`, optional `location_id`).
@@ -643,5 +643,5 @@ Implementation preparation details are in [docs/dashboard-scenes.md](dashboard-s
 - Requires a careful v1→v2 migration, batched writes to limit churn, and per-figure error/performance isolation
   (respecting `DASHBOARD_MAX_POINTS` and read limits).
 - Introduces a third-party frontend dependency that must be vendored, reviewed for license/CSP fit, and maintained.
-- Defers several product decisions to implementation (sharing granularity as scene, grid library/parameters, save UX,
-  scene-open loading strategy, figure caps) which must be finalized and reflected back into docs/tests.
+- Resolves the product decisions during implementation (scene as sharing unit, GridStack parameters, debounced layout
+  autosave, eager per-panel chart loading); figure caps remain open and should be reflected back into docs/tests.
