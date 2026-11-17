@@ -613,7 +613,7 @@ several locations into one chart.
 
 ## ADR-028: Scene-based grid dashboard with versioned JSON state
 
-**Status:** Accepted (implemented; manual browser/restore verification pending)
+**Status:** Accepted (implemented; automated restart/restore coverage added; manual browser verification pending)
 
 **Context:** The current dashboard (ADR-026/027) shows one figure at a time from flat personal/shared lists backed by
 `state.json` `version: 1`. The desired UX is scene-based: scenes (flat containers of figures) listed in the left pane,

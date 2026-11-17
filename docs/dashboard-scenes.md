@@ -1,9 +1,10 @@
 # Dashboard scenes redesign
 
 > **Status:** Implemented. The state layer (version 2 scenes schema, validation, and v1 → v2 migration), the
-> server-rendered scene shell (scene list, options pane, grid workspace, scene-aware routes), and the GridStack
-> drag/resize/snap workspace with debounced batched layout persistence have landed. Remaining: manual browser and
-> performance verification, plus any follow-up decisions captured in §9.
+> server-rendered scene shell (scene list, options pane, grid workspace, scene-aware routes), the GridStack
+> drag/resize/snap workspace with debounced batched layout persistence, and the per-scene figure cap have landed.
+> Automated coverage now includes app restart and v2 backup restore. Remaining: manual browser and performance
+> verification, plus any follow-up decisions captured in §9.
 > Current shipped behavior is documented in [dashboard.md](dashboard.md). Implementers should keep this document
 > updated as decisions are finalized.
 
