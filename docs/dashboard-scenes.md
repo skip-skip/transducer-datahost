@@ -186,8 +186,8 @@ Sketch of the current shape:
    template, scene-options and figure-options partials; accessible labels and HTMX targets preserved.
 4. **Static assets (done):** vendored GridStack.js 14.1.1 with license notice; multi-chart registry, range toggle,
    resize handling, and debounced layout saves in `app.js`; three-pane/grid/panel/collapse styling in `app.css`.
-5. **Settings/config:** only add env vars if truly required (e.g. grid defaults/limits); prefer safe defaults to minimize
-   deployment/config churn.
+5. **Settings/config (done):** added `DASHBOARD_MAX_FIGURES_PER_SCENE` (default 50, positive-value validation) as the
+   only new setting; grid defaults stay code-level constants to minimize deployment/config churn.
 6. **Verification (partial):** unit tests cover migration, operations, routes, permissions, and layout payloads.
    **Pending:** manual browser checks (drag/resize/snap persistence, restart/restore) and performance sanity with
    representative scene sizes.
@@ -212,8 +212,10 @@ Sketch of the current shape:
 - **Grid definition:** scene-level column count (default 12) and row height (default 220 px), minimum panel size 2×1
   cells, vertical compaction (`float: false`), and a horizontal-scroll workspace on small screens.
 - **Scene open behavior:** charts load eagerly per panel through HTMX; per-panel errors stay isolated.
+- **Figure cap:** each scene is limited to `DASHBOARD_MAX_FIGURES_PER_SCENE` figures (default 50). The domain layer and
+  create route enforce the cap; the scene options pane shows `X of N figures` and replaces `+ Add figure` with a limit
+  hint when the scene is full.
 - **v1 → v2 default scene mapping:** one `Default scene` per scope/owner with non-overlapping layouts (implemented).
-- **Open:** figure caps / concurrent chart renders for performance safety.
 
 ## 10. References
 

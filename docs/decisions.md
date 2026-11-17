@@ -644,4 +644,5 @@ Implementation preparation details are in [docs/dashboard-scenes.md](dashboard-s
   (respecting `DASHBOARD_MAX_POINTS` and read limits).
 - Introduces a third-party frontend dependency that must be vendored, reviewed for license/CSP fit, and maintained.
 - Resolves the product decisions during implementation (scene as sharing unit, GridStack parameters, debounced layout
-  autosave, eager per-panel chart loading); figure caps remain open and should be reflected back into docs/tests.
+  autosave, eager per-panel chart loading, per-scene figure cap); the cap is `DASHBOARD_MAX_FIGURES_PER_SCENE`
+  (default 50) and is enforced in the domain/API and reflected in the options pane.

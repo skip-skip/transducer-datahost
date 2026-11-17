@@ -24,6 +24,7 @@ from .state import (
 )
 
 DEFAULT_FIGURE_NAME = "Untitled figure"
+DEFAULT_MAX_FIGURES_PER_SCENE = 50
 UNSET: object = object()
 
 
@@ -447,6 +448,7 @@ def create_scene_figure(
     series_id: int | None = None,
     location_id: int | None = None,
     config: dict[str, Any] | None = None,
+    max_figures: int | None = DEFAULT_MAX_FIGURES_PER_SCENE,
 ) -> dict[str, Any]:
     if not can_edit(scope, label, shared_editors):
         raise FigurePermissionError("this token may not edit shared figures")
@@ -456,6 +458,10 @@ def create_scene_figure(
         raise SceneNotFound("scene not found")
 
     figures = scene.setdefault("figures", [])
+    if max_figures is not None and len(figures) >= max_figures:
+        raise FigureError(
+            f"scene has reached the maximum of {max_figures} figures"
+        )
     requested = (name or DEFAULT_FIGURE_NAME).strip() or DEFAULT_FIGURE_NAME
     now = _now()
     cols = scene.get("grid", {}).get("cols", DEFAULT_GRID_COLS)

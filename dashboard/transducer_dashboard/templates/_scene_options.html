@@ -1,5 +1,5 @@
 <h2 class="options-title">{{ scene.name }}</h2>
-<p class="hint">{{ scene.figures | length }} figure{% if scene.figures | length != 1 %}s{% endif %} in this scene.</p>
+<p class="hint">{{ scene.figures | length }} of {{ figure_limit }} figures in this scene.</p>
 
 {% if can_edit %}
 <form class="options-form" method="post"
@@ -25,10 +25,14 @@
   </div>
 </form>
 
+{% if at_figure_limit %}
+<p class="hint">This scene has reached the {{ figure_limit }}-figure limit.</p>
+{% else %}
 <form method="post" class="inline-form"
       action="{{ url_for('create_scene_figure', scope=scope, scene_id=scene.id) }}">
   <button type="submit">+ Add figure</button>
 </form>
+{% endif %}
 
 <form method="post"
       action="{{ url_for('delete_scene', scope=scope, scene_id=scene.id) }}"

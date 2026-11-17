@@ -365,6 +365,8 @@ def create_app(
         figure = next(
             (item for item in figures if item.get("id") == selected_figure_id), None
         )
+        figure_limit = settings.max_figures_per_scene
+        at_figure_limit = scene is not None and len(figures) >= figure_limit
 
         range_key = range if range in RANGES else _default_range(settings)
         locations: list[dict[str, Any]] = []
@@ -410,6 +412,8 @@ def create_app(
                 locations=locations,
                 analytes=analytes,
                 range_key=range_key,
+                figure_limit=figure_limit,
+                at_figure_limit=at_figure_limit,
                 can_edit=figure_ops.can_edit(
                     scope, session.label, settings.shared_editors
                 ),
@@ -658,6 +662,7 @@ def create_app(
                     settings.shared_editors,
                     scene_id,
                     name=name or None,
+                    max_figures=settings.max_figures_per_scene,
                 )
             )
         except SceneNotFound as exc:

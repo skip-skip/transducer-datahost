@@ -209,6 +209,36 @@ def test_scene_figures_get_non_overlapping_layouts() -> None:
             )
 
 
+def test_create_scene_figure_respects_max_figures() -> None:
+    state = default_state()
+    scene = figures.create_scene(state, "personal", "alice", NO_EDITORS)
+
+    figure = figures.create_scene_figure(
+        state,
+        "personal",
+        "alice",
+        NO_EDITORS,
+        scene["id"],
+        max_figures=1,
+    )
+    assert scene["figures"] == [figure]
+
+    with pytest.raises(figures.FigureError, match="maximum of 1 figures"):
+        figures.create_scene_figure(
+            state,
+            "personal",
+            "alice",
+            NO_EDITORS,
+            scene["id"],
+            max_figures=1,
+        )
+
+    assert scene["figures"] == [figure]
+    assert figures.get_ui(state, "alice")["personal"]["selected_figure_id"] == figure[
+        "id"
+    ]
+
+
 def test_update_scene_figure_layout_is_validated() -> None:
     state = default_state()
     scene = figures.create_scene(state, "personal", "alice", NO_EDITORS)

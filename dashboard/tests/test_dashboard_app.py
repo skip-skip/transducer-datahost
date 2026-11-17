@@ -123,12 +123,17 @@ class FakeReadClient:
             raise ReadApiError(401, "invalid or expired token")
 
 
-def make_settings(tmp_path, shared_editors=frozenset()) -> DashboardSettings:
+def make_settings(
+    tmp_path,
+    shared_editors=frozenset(),
+    max_figures_per_scene=50,
+) -> DashboardSettings:
     return DashboardSettings(
         read_api_url="http://read-api:8080",
         secret_key="x" * 32,
         state_dir=tmp_path,
         shared_editors=shared_editors,
+        max_figures_per_scene=max_figures_per_scene,
         cookie_secure=False,
     )
 
@@ -201,6 +206,15 @@ def create_figure(
     )
     assert response.status_code == 303
     return find_scene(tmp_path, scene["id"], scope, label)["figures"][-1]
+
+
+def select_scene(test_client: TestClient, scene, *, scope="personal"):
+    response = test_client.post(
+        "/ui/select",
+        data={"scope": scope, "scene_id": scene["id"]},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
 
 
 def test_health_is_public(client: TestClient) -> None:
@@ -298,6 +312,41 @@ def test_create_scene_and_figure(client: TestClient, tmp_path) -> None:
     assert (
         f"/scenes/personal/{scene['id']}/figures/{figure['id']}" in page.text
     )
+
+
+def test_scene_figure_cap(tmp_path) -> None:
+    app = create_app(
+        make_settings(tmp_path, max_figures_per_scene=2),
+        FakeReadClient(),
+    )
+    with TestClient(app) as test_client:
+        login(test_client)
+        scene = create_scene(test_client, tmp_path)
+        create_figure(test_client, tmp_path, scene)
+
+        select_scene(test_client, scene)
+        page = test_client.get("/")
+        assert page.status_code == 200
+        assert "1 of 2 figures" in page.text
+        assert "+ Add figure" in page.text
+
+        create_figure(test_client, tmp_path, scene)
+
+        select_scene(test_client, scene)
+        page = test_client.get("/")
+        assert page.status_code == 200
+        assert "2 of 2 figures" in page.text
+        assert "This scene has reached the 2-figure limit." in page.text
+        assert "+ Add figure" not in page.text
+
+        denied = test_client.post(
+            f"/scenes/personal/{scene['id']}/figures",
+            data={"scope": "personal"},
+            follow_redirects=False,
+        )
+        assert denied.status_code == 400
+        assert "maximum of 2 figures" in denied.text
+        assert len(find_scene(tmp_path, scene["id"])["figures"]) == 2
 
 
 def test_update_and_delete_figure(client: TestClient, tmp_path) -> None:

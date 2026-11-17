@@ -52,6 +52,7 @@ locations") chart the whole series.
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
 | `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
+| `DASHBOARD_MAX_FIGURES_PER_SCENE` | `50` | Maximum figures in one scene |
 | `DASHBOARD_SHARED_EDITORS` | empty | Comma-separated labels allowed to edit shared scenes/figures; empty means any valid read key |
 | `DASHBOARD_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local development |
 | `SITE_TIMEZONE` | `America/New_York` | Range calculation time zone |

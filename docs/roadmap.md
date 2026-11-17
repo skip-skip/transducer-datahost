@@ -217,6 +217,8 @@ Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/d
   keep FastAPI/Jinja/Plotly/JSON state and **no Node build step**. *(GridStack.js 14.1.1, MIT.)*
 - [x] Update `docs/dashboard.md`, `dashboard/README.md`, tests (migration, operations, routes, permissions, layout
   payloads), and backup/restore notes for v2 state.
+- [x] Cap figures per scene with `DASHBOARD_MAX_FIGURES_PER_SCENE` (default 50), enforced in the domain/API and surfaced
+  in the options pane.
 
 **Exit criteria**
 

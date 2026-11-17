@@ -168,7 +168,9 @@ Scenes pane (left):
 Options pane (nested right of the scenes pane):
 
 - With a scene selected and no figure: scene name, grid columns, row height,
-  `+ Add figure`, and delete scene.
+  a `X of N figures` count, `+ Add figure`, and delete scene. At the
+  `DASHBOARD_MAX_FIGURES_PER_SCENE` cap the add button is replaced by a limit
+  hint.
 - With a figure selected: name, location, analyte, save, delete, and a read-only
   layout summary.
 - `DASHBOARD_SHARED_EDITORS` rules apply; read-only shared views disable or hide
@@ -194,7 +196,10 @@ Grid workspace (main):
 - The workspace scrolls horizontally on narrow screens instead of reflowing
   panels, so stored grid positions stay meaningful.
 
-A new figure starts with a default name, no series, and the next free grid slot.
+A scene holds at most `DASHBOARD_MAX_FIGURES_PER_SCENE` figures (default 50).
+The domain layer and the create route both enforce the cap, so a request that
+races the UI still cannot exceed it. A new figure starts with a default name, no
+series, and the next free grid slot.
 Saving rejects a series that does not exist and a location/series pair with no
 readings together, so a figure cannot silently render an empty chart. A
 location with no series reports it in the analyte selector.
@@ -229,6 +234,7 @@ new table grants and an un-scoped request keeps returning the whole series.
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
 | `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
+| `DASHBOARD_MAX_FIGURES_PER_SCENE` | `50` | Maximum figures in one scene (must be positive) |
 | `DASHBOARD_SHARED_EDITORS` | empty | Labels allowed to edit shared figures |
 | `DASHBOARD_COOKIE_SECURE` | `true` | `false` only for local HTTP development |
 | `DASHBOARD_REQUEST_TIMEOUT` | `15` | Read API timeout (seconds) |
