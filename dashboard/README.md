@@ -8,19 +8,25 @@ forwards that token on every data request.
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
 > **Planned redesign:** scenes (flat containers of figures), a multi-figure snapping grid workspace, and a
-> context-sensitive options pane are planned (state v2, no DB/read-API boundary changes). See
+> context-sensitive options pane are planned (no DB/read-API boundary changes). See
 > [../docs/dashboard-scenes.md](../docs/dashboard-scenes.md). The sections below describe the current
 > implementation.
 
 ## State
 
 Layout state is a single JSON file on the Compose volume `dashboard_state`,
-mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
+mounted at `/var/lib/transducer-dashboard/state.json`. It is **version 2** and
+contains:
 
-- `personal[<token label>].figures`: private figures for each read key.
-- `shared.figures`: figures visible to every read key.
-- `personal[<token label>].ui`: selected figure, folder-pane collapse, and view
+- `shared.scenes` / `personal[<token label>].scenes`: scenes (flat containers
+  of figures) with grid settings and a per-figure layout.
+- `personal[<token label>].ui`: selected scene/figure, pane collapse, and view
   for each user, separately for personal and shared.
+
+The current UI is still single-figure and uses a per-scope `Default scene`;
+the scenes/grid workspace is the remaining Phase 9 work. Version 1 documents
+are migrated on first load into a default scene per scope/owner, validated, and
+written through the normal atomic path (`state.json.bak` keeps the old file).
 
 Writes take a file lock, fsync a temporary file, copy the previous version to
 `state.json.bak`, and atomically replace `state.json`. The container runs one
@@ -42,7 +48,7 @@ locations") chart the whole series.
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
 | `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
-| `DASHBOARD_SHARED_EDITORS` | empty | Comma-separated labels allowed to edit shared figures; empty means any valid read key |
+| `DASHBOARD_SHARED_EDITORS` | empty | Comma-separated labels allowed to edit shared scenes/figures; empty means any valid read key |
 | `DASHBOARD_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local development |
 | `SITE_TIMEZONE` | `America/New_York` | Range calculation time zone |
 
@@ -57,7 +63,8 @@ docker compose exec dashboard cat /var/lib/transducer-dashboard/state.json \
 
 Restore by stopping the dashboard, replacing `state.json`, keeping ownership for
 the container user (uid 10001), and starting it again. `state.json.bak` holds the
-previous version.
+previous version. Restoring a version 1 file is supported: it migrates to
+version 2 on first load and the pre-migration file is copied to `state.json.bak`.
 
 ## Development
 

@@ -6,8 +6,9 @@ adds no database tables, no database role, and no write routes to the API.
 Production URL: `https://<INGEST_HOSTNAME>:8443/dashboard/`.
 
 > **Planned update (scenes redesign):** this document describes the **current** single-figure dashboard
-> (`state.json` `version: 1`). A planned redesign introduces **scenes** (flat containers of figures), a
-> multi-figure grid workspace with snapping panels, and a context-sensitive options pane. Implementation
+> UI. Its state is already `state.json` `version: 2`, which stores scenes (flat containers of figures) with
+> per-figure grid layouts; the UI still uses a per-scope default scene. A planned redesign introduces the
+> multi-figure grid workspace with snapping panels and a context-sensitive options pane. Implementation
 > preparation, target state shape, migration, and techstack changes are captured in
 > [dashboard-scenes.md](dashboard-scenes.md). Boundaries remain the same (no DB schema/roles, no dashboard
 > state in PostgreSQL, no read-API writes, read-API-token auth).
@@ -57,20 +58,34 @@ nosniff`, `Referrer-Policy: same-origin`, and a self-only Content-Security-Polic
 ## 3. State
 
 State is one JSON file on the `dashboard_state` volume. It is deliberately not
-in PostgreSQL.
+in PostgreSQL. Version 2 organizes figures into **scenes**: flat containers with
+grid settings and a layout for each figure. The current UI is still
+single-figure; it reads and writes a per-scope `Default scene` until the
+scene/grid workspace ships (Phase 9, [dashboard-scenes.md](dashboard-scenes.md)).
 
 ```json
 {
-  "version": 1,
+  "version": 2,
   "shared": {
-    "figures": [
+    "scenes": [
       {
-        "id": "5f0c8e...",
-        "name": "GC-1980 water level",
-        "series_id": 42,
-        "location_id": 7,
+        "id": "0f3c9a...",
+        "name": "Default scene",
         "position": 0,
-        "config": {},
+        "grid": { "cols": 12, "row_height": 220 },
+        "figures": [
+          {
+            "id": "5f0c8e...",
+            "name": "GC-1980 water level",
+            "series_id": 42,
+            "location_id": 7,
+            "config": {},
+            "layout": { "x": 0, "y": 0, "w": 6, "h": 2 },
+            "created_by": "analyst-1",
+            "created_at": "2026-11-11T13:00:00Z",
+            "updated_at": "2026-11-11T13:00:00Z"
+          }
+        ],
         "created_by": "analyst-1",
         "created_at": "2026-11-11T13:00:00Z",
         "updated_at": "2026-11-11T13:00:00Z"
@@ -79,11 +94,21 @@ in PostgreSQL.
   },
   "personal": {
     "analyst-1": {
-      "figures": [],
+      "scenes": [],
       "ui": {
         "view": "personal",
-        "personal": { "selected_figure_id": null, "folders_collapsed": false },
-        "shared":   { "selected_figure_id": null, "folders_collapsed": false },
+        "personal": {
+          "selected_scene_id": null,
+          "selected_figure_id": null,
+          "folders_collapsed": false,
+          "options_collapsed": false
+        },
+        "shared": {
+          "selected_scene_id": null,
+          "selected_figure_id": null,
+          "folders_collapsed": false,
+          "options_collapsed": false
+        },
         "tz": "local"
       }
     }
@@ -93,6 +118,10 @@ in PostgreSQL.
 
 Rules:
 
+- A **scene** is a flat container of figures (no nested scenes). It carries a
+  name, display position, grid settings (`cols`, `row_height`), and figures.
+- A **figure** belongs to exactly one scene and keeps a grid `layout`
+  (`x`, `y`, `w`, `h`) that must fit inside the scene's `cols`.
 - A figure binds to a `series_id` and, since location-based selection, an
   optional `location_id`. Location and analyte are UI selectors that resolve
   to one series at one location, so multi-channel loggers, unit changes, and
@@ -100,11 +129,21 @@ Rules:
 - `location_id` is null for figures saved before location scoping and for
   deliberately un-scoped ones: they chart the whole series across every
   location, and the location selector shows "All locations" until re-saved.
-- Personal figures are visible only to the matching token label.
-- Shared figures are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
+- Personal scenes are visible only to the matching token label.
+- Shared scenes are visible to every valid read token. `DASHBOARD_SHARED_EDITORS`
   optionally restricts who may edit them; empty means any valid read key.
-- Selected figure and pane collapse are stored per user and per view.
-- Figure IDs are UUIDs because there is no database identity column.
+- Selected scene, selected figure, pane collapse, and view are stored per user.
+- Scene and figure IDs are UUIDs because there is no database identity column.
+
+Migration from version 1:
+
+- A version 1 document is migrated on first load: every scope/owner gets one
+  `Default scene` containing its previous figures, figures get sequential
+  non-overlapping layouts, and the old selected figure maps to the new selected
+  scene plus figure.
+- The migrated document is validated, written through the normal atomic path,
+  and the previous `state.json` is kept as `state.json.bak`. Subsequent loads
+  see version 2 and are unchanged.
 
 Write safety:
 

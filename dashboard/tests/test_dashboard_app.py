@@ -150,6 +150,14 @@ def read_state(tmp_path):
     return json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
 
 
+def personal_figures(state, label="alice"):
+    return state["personal"][label]["scenes"][0]["figures"]
+
+
+def shared_figures(state):
+    return state["shared"]["scenes"][0]["figures"]
+
+
 def test_health_is_public(client: TestClient) -> None:
     assert client.get("/health").json() == {"status": "ok"}
 
@@ -213,7 +221,7 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
     assert created.status_code == 303
 
     state = read_state(tmp_path)
-    figures = state["personal"]["alice"]["figures"]
+    figures = personal_figures(state)
     assert len(figures) == 1
     figure_id = figures[0]["id"]
     assert figures[0]["name"] == "Untitled figure"
@@ -226,7 +234,7 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
     assert updated.status_code == 303
 
     state = read_state(tmp_path)
-    figure = state["personal"]["alice"]["figures"][0]
+    figure = personal_figures(state)[0]
     assert figure["name"] == "GC-1980 water level"
     assert figure["series_id"] == 42
     assert figure["location_id"] == 7
@@ -242,7 +250,7 @@ def test_create_update_and_delete_figure(client: TestClient, tmp_path) -> None:
         f"/figures/personal/{figure_id}/delete", follow_redirects=False
     )
     assert deleted.status_code == 303
-    assert read_state(tmp_path)["personal"]["alice"]["figures"] == []
+    assert personal_figures(read_state(tmp_path)) == []
 
 
 def test_location_scoped_chart_requests_location_points(tmp_path) -> None:
@@ -251,7 +259,7 @@ def test_location_scoped_chart_requests_location_points(tmp_path) -> None:
     with TestClient(app) as test_client:
         login(test_client)
         test_client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-        figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+        figure_id = personal_figures(read_state(tmp_path))[0]["id"]
         saved = test_client.post(
             f"/figures/personal/{figure_id}",
             data={"name": "MCMW-04 level", "series_id": "42", "location_id": "7"},
@@ -272,7 +280,7 @@ def test_legacy_figure_without_location_charts_whole_series(
 ) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     saved = client.post(
         f"/figures/personal/{figure_id}",
@@ -281,7 +289,7 @@ def test_legacy_figure_without_location_charts_whole_series(
     )
     assert saved.status_code == 303
 
-    figure = read_state(tmp_path)["personal"]["alice"]["figures"][0]
+    figure = personal_figures(read_state(tmp_path))[0]
     assert figure["series_id"] == 42
     assert figure.get("location_id") is None
 
@@ -294,7 +302,7 @@ def test_legacy_figure_without_location_charts_whole_series(
 def test_update_rejects_blank_name(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     response = client.post(
         f"/figures/personal/{figure_id}",
@@ -308,7 +316,7 @@ def test_update_rejects_blank_name(client: TestClient, tmp_path) -> None:
 def test_update_rejects_unknown_series(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     response = client.post(
         f"/figures/personal/{figure_id}",
@@ -323,7 +331,7 @@ def test_update_rejects_unknown_series(client: TestClient, tmp_path) -> None:
 def test_update_rejects_series_not_at_location(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     response = client.post(
         f"/figures/personal/{figure_id}",
@@ -338,7 +346,7 @@ def test_update_rejects_series_not_at_location(client: TestClient, tmp_path) -> 
 def test_update_rejects_unknown_location(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     response = client.post(
         f"/figures/personal/{figure_id}",
@@ -361,7 +369,7 @@ def test_shared_figure_permissions(tmp_path) -> None:
             "/figures", data={"scope": "shared"}, follow_redirects=False
         )
         assert allowed.status_code == 303
-        assert len(read_state(tmp_path)["shared"]["figures"]) == 1
+        assert len(shared_figures(read_state(tmp_path))) == 1
 
         login(test_client, "viewer")
         denied = test_client.post(
@@ -423,7 +431,7 @@ def test_analytes_partial_all_locations_lists_every_series(
 def test_chart_partial(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
     client.post(
         f"/figures/personal/{figure_id}",
         data={"name": "Chart", "series_id": "42"},
@@ -443,7 +451,7 @@ def test_chart_partial(client: TestClient, tmp_path) -> None:
 def test_chart_partial_requires_the_owning_scope(client: TestClient, tmp_path) -> None:
     login(client)
     client.post("/figures", data={"scope": "personal"}, follow_redirects=False)
-    figure_id = read_state(tmp_path)["personal"]["alice"]["figures"][0]["id"]
+    figure_id = personal_figures(read_state(tmp_path))[0]["id"]
 
     response = client.get(
         "/partials/chart",

@@ -204,9 +204,10 @@ Preparation: [docs/dashboard-scenes.md](dashboard-scenes.md), ADR-028 in [docs/d
 
 **Planned deliverables**
 
-- [ ] Evolve dashboard state to **`version: 2`** with **scenes** as flat containers of figures, per-figure grid
+- [x] Evolve dashboard state to **`version: 2`** with **scenes** as flat containers of figures, per-figure grid
   layout (`x`,`y`,`w`,`h`/constraints), scene/grid settings, and per-user UI (selected scene/figure, pane collapse);
-  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety.
+  implement deterministic **v1 → v2 migration** on load/write with validation and `.bak` safety. *(State layer
+  landed; scene/grid UI still pending.)*
 - [ ] Replace single-figure navigation with **scenes in the left pane**, a **multi-figure grid workspace** (figures as
   window-like panels that drag/resize and **snap** to the grid), and a **nested options pane** (right of the left pane)
   showing context-sensitive **scene or figure** options.

@@ -1,8 +1,10 @@
 # Dashboard scenes redesign (implementation prep)
 
-> **Status:** Planned. This document prepares implementation and does **not** describe shipped behavior.
-> The current dashboard (single-figure-per-view, flat figure lists, state `version: 1`) is documented in
-> [dashboard.md](dashboard.md). Implementers should keep this document updated as decisions are finalized.
+> **Status:** In progress. The state layer (version 2 scenes schema, validation, and v1 → v2 migration) has landed;
+> the scene/grid/options UI and scene-aware routes are still planned. This document prepares implementation and does
+> **not** describe shipped behavior.
+> The current dashboard UI (single-figure-per-view, state `version: 2` with figures inside a default scene) is
+> documented in [dashboard.md](dashboard.md). Implementers should keep this document updated as decisions are finalized.
 
 ## 1. Goal
 
@@ -22,10 +24,12 @@ read-only API.
 ## 2. Current baseline (to replace/extend)
 
 - FastAPI + Jinja2 + HTMX + Plotly, vanilla JS/CSS, vendored static assets, **no Node/build step**.
-- State: `dashboard_state` volume JSON (`state.json`, `version: 1`, `StateStore` with file lock + atomic write).
-  Model: `shared.figures[]`, `personal[label].figures[]`, per-scope UI selection/collapse.
+- State: `dashboard_state` volume JSON (`state.json`, `version: 2`, `StateStore` with file lock + atomic write).
+  Model: `shared.scenes[]` and `personal[label].scenes[]`; each scene has grid settings and figures with
+  per-figure layout, plus per-scope UI selection/collapse. The version 1 layout
+  (`shared.figures[]`, `personal[label].figures[]`) migrates to a default scene on load.
 - UI: left pane lists figures; main pane edits/charts exactly one selected figure at a time; chart rendered client-side
-  from a single Plotly payload (`app.js`).
+  from a single Plotly payload (`app.js`). The scene/grid/options UI is not built yet.
 - Figure identity/binding: UUID id, `series_id`, optional `location_id` (ADR-027), per-figure config; permissions are
   personal-vs-shared with optional `DASHBOARD_SHARED_EDITORS`.
 
@@ -78,44 +82,80 @@ See [dashboard.md](dashboard.md), `dashboard/transducer_dashboard/{app,figures,s
   dependency cannot be vendored sanely).
 - No PostgreSQL tables/roles/migrations and no read-API write endpoints.
 
-## 5. State schema and migration (planned)
+## 5. State schema and migration
 
-> Exact field names may be refined during implementation; this is the target shape to drive coding and review.
+> The version 2 state layer is implemented. Scene/grid UI and scene-aware routes are still planned.
 
-### 5.1 Target concepts (v2)
-- **Scene:** `id` (UUID), `name`, `figures[]`, `layout`/grid settings, optional `created_by/created_at/updated_at`.
+### 5.1 Implemented v2 shape
+- **Scene:** `id` (UUID), `name`, `position`, `grid` (`cols`, `row_height`), `figures[]`,
+  `created_by`/`created_at`/`updated_at`.
 - **Figure (scene member):** `id` (UUID), `name`, `series_id`, `location_id` (nullable, ADR-027 semantics), `config`
-  (e.g. range/tz/display), `layout` (`x`,`y`,`w`,`h`, constraints), timestamps/creator as needed.
+  (e.g. range/tz/display), `layout` (`x`,`y`,`w`,`h`), timestamps/creator.
 - **Scoping:** personal scenes per token label and shared scenes visible to valid read tokens, with edit rules aligned to
-  (or explicitly redefining) `DASHBOARD_SHARED_EDITORS`.
-- **UI state:** selected scene id, selected figure id, pane collapse (scenes/options), active scope/view.
+  `DASHBOARD_SHARED_EDITORS`.
+- **UI state:** selected scene id, selected figure id, pane collapse (`folders_collapsed` for the navigation pane and
+  `options_collapsed` for the nested options pane), active scope/view, timezone.
 
-Illustrative sketch (non-normative):
+Sketch of the current shape:
 
 ```json
 {
   "version": 2,
-  "shared": { "scenes": [ { "id": "...", "name": "...", "grid": {"cols": 12}, "figures": [/* figure + layout */] } ] },
+  "shared": {
+    "scenes": [
+      {
+        "id": "...",
+        "name": "Default scene",
+        "position": 0,
+        "grid": {"cols": 12, "row_height": 220},
+        "figures": [
+          {
+            "id": "...",
+            "name": "...",
+            "series_id": 42,
+            "location_id": 7,
+            "config": {},
+            "layout": {"x": 0, "y": 0, "w": 6, "h": 2},
+            "created_by": "...",
+            "created_at": "...",
+            "updated_at": "..."
+          }
+        ],
+        "created_by": "...",
+        "created_at": "...",
+        "updated_at": "..."
+      }
+    ]
+  },
   "personal": {
     "<label>": {
       "scenes": [],
       "ui": {
         "view": "personal",
-        "selected_scene_id": null,
-        "selected_figure_id": null,
-        "scenes_collapsed": false,
-        "options_collapsed": false
+        "personal": {
+          "selected_scene_id": null,
+          "selected_figure_id": null,
+          "folders_collapsed": false,
+          "options_collapsed": false
+        },
+        "shared": {
+          "selected_scene_id": null,
+          "selected_figure_id": null,
+          "folders_collapsed": false,
+          "options_collapsed": false
+        },
+        "tz": "local"
       }
     }
   }
 }
 ```
 
-### 5.2 Migration from v1
-- Detect `version: 1` on load; transform to v2 deterministically.
-- **Default mapping (proposed):** create one scene per scope per user context that preserves access to existing figures
-  (e.g. a "Default" scene containing migrated figures with generated grid layouts), or an equivalent mapping that loses
-  no figure bindings/config. Document the chosen mapping in code and release notes.
+### 5.2 Migration from v1 (implemented)
+- Detect `version: 1` on load; transform to v2.
+- **Default mapping:** one `Default scene` per scope/owner contains the previous figures; figures receive sequential,
+  non-overlapping grid layouts; the old selected figure maps to the new selected scene and figure (stale selections
+  are dropped).
 - Preserve ADR-027 semantics: figures with `location_id: null` remain valid/unscoped until edited.
 - Write migrated state through the normal atomic path; retain `state.json.bak`. Validate strictly after migration.
 
