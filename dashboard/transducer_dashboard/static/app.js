@@ -88,7 +88,7 @@
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     }).then(function (response) {
-      if (!response.ok) {
+      if (response.status !== 204) {
         throw new Error("layout save failed with " + response.status);
       }
       setGridStatus(element, "Layout saved", false);
