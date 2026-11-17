@@ -105,7 +105,7 @@ def create_app(
     # precedence over the Panel application for paths such as /login and
     # /health.
     add_applications(
-        {"/": create_panel_app(settings, codec)},
+        {"/": create_panel_app(settings, codec, store, client)},
         app=app,
         title="Transducer dashboard",
         location=False,

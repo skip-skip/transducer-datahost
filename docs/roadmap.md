@@ -214,7 +214,7 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
 - [x] Scene domain operations: create and delete scenes; per-user selected scene and tray
   state.
-- [ ] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
+- [x] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
 - [ ] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
   Clicking an empty cell creates a minimum-size figure there.
 - [ ] Figure title ribbon: click selects and highlights the figure and opens the settings
@@ -226,7 +226,8 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [x] Tests for state v2, scene/figure operations, and the Panel mount.
-- [ ] Tests for the Panel callbacks and the chart builder.
+- [x] Tests for the Panel scene-shell callbacks.
+- [ ] Tests for the chart builder.
 
 **Exit criteria**
 

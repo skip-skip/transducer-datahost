@@ -4,9 +4,10 @@ from fastapi.testclient import TestClient
 
 from transducer_dashboard.app import create_app
 from transducer_dashboard.auth import COOKIE_NAME, SessionCodec
-from transducer_dashboard.panel_app import build_placeholder
+from transducer_dashboard.panel_app import build_view
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
+from transducer_dashboard.state import StateStore
 
 
 class FakeReadClient:
@@ -43,9 +44,36 @@ def login(test_client: TestClient, token: str = "good"):
     )
 
 
-def html_text(view: pn.Column) -> str:
+def walk(view):
+    yield view
+    for child in getattr(view, "objects", None) or []:
+        yield from walk(child)
+
+
+def html_text(view) -> str:
     return "\n".join(
-        obj.object for obj in view.objects if isinstance(obj, pn.pane.HTML)
+        obj.object for obj in walk(view) if isinstance(obj, pn.pane.HTML)
+    )
+
+
+def button_labels(view) -> list[str]:
+    return [obj.label for obj in walk(view) if isinstance(obj, pn.widgets.Button)]
+
+
+def make_store(tmp_path) -> StateStore:
+    store = StateStore(tmp_path)
+    store.ensure()
+    return store
+
+
+def build(tmp_path, cookies: dict[str, str]):
+    codec = SessionCodec("x" * 32, 60)
+    return build_view(
+        cookies,
+        codec,
+        make_store(tmp_path),
+        FakeReadClient(),
+        make_settings(tmp_path),
     )
 
 
@@ -151,26 +179,28 @@ def test_root_path_is_preserved_for_login_and_panel(tmp_path) -> None:
         assert logout.headers["location"].endswith("/dashboard/login")
 
 
-def test_placeholder_shows_sign_in_without_a_session() -> None:
-    codec = SessionCodec("x" * 32, 60)
-    view = build_placeholder({}, codec)
+def test_build_view_shows_sign_in_without_a_session(tmp_path) -> None:
+    view = build(tmp_path, {})
 
     assert "Sign in" in html_text(view)
 
 
-def test_placeholder_shows_the_signed_in_label() -> None:
+def test_build_view_shows_the_scene_shell_for_a_session(tmp_path) -> None:
     codec = SessionCodec("x" * 32, 60)
-    view = build_placeholder({COOKIE_NAME: codec.dump("alice", "good")}, codec)
+    view = build(tmp_path, {COOKIE_NAME: codec.dump("alice", "good")})
 
     text = html_text(view)
     assert "Signed in as" in text
     assert "alice" in text
+    assert "+ New scene" in button_labels(view)
+    assert "No scenes yet" in text
 
 
-def test_placeholder_escapes_the_label() -> None:
+def test_build_view_escapes_the_session_label(tmp_path) -> None:
     codec = SessionCodec("x" * 32, 60)
-    view = build_placeholder(
-        {COOKIE_NAME: codec.dump("<script>alert(1)</script>", "good")}, codec
+    view = build(
+        tmp_path,
+        {COOKIE_NAME: codec.dump("<script>alert(1)</script>", "good")},
     )
 
     text = html_text(view)
@@ -178,8 +208,7 @@ def test_placeholder_escapes_the_label() -> None:
     assert "&lt;script&gt;" in text
 
 
-def test_placeholder_rejects_an_invalid_cookie() -> None:
-    codec = SessionCodec("x" * 32, 60)
-    view = build_placeholder({COOKIE_NAME: "not-a-signed-cookie"}, codec)
+def test_build_view_rejects_an_invalid_cookie(tmp_path) -> None:
+    view = build(tmp_path, {COOKIE_NAME: "not-a-signed-cookie"})
 
     assert "Sign in" in html_text(view)

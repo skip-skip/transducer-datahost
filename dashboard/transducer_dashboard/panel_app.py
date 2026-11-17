@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
-import html
 from collections.abc import Callable, Mapping
 
 import panel as pn
 
-from .auth import Session, SessionCodec
+from .auth import SessionCodec
+from .read_client import ReadClient
 from .settings import DashboardSettings
+from .state import StateStore
+from .workspace import DashboardShell
 
 
 def _sign_in_view() -> pn.Column:
@@ -21,35 +23,29 @@ def _sign_in_view() -> pn.Column:
     )
 
 
-def _signed_in_view(session: Session) -> pn.Column:
-    label = html.escape(session.label)
-    return pn.Column(
-        pn.pane.Markdown("# Transducer dashboard"),
-        pn.pane.HTML(f"<p>Signed in as <strong>{label}</strong>.</p>"),
-        pn.pane.HTML(
-            "<p>The Panel workspace is being built. Scenes, figures, and settings "
-            "will appear here.</p>"
-            '<form method="post" action="logout"><button type="submit">Sign out</button></form>'
-        ),
-    )
-
-
-def build_placeholder(
-    cookies: Mapping[str, str], codec: SessionCodec
+def build_view(
+    cookies: Mapping[str, str],
+    codec: SessionCodec,
+    store: StateStore,
+    client: ReadClient,
+    settings: DashboardSettings,
 ) -> pn.Column:
-    """Render the mount-stage placeholder for the request's session."""
+    """Render the sign-in page or the scene workspace for the request's session."""
     session = codec.from_cookies(cookies)
     if session is None:
         return _sign_in_view()
-    return _signed_in_view(session)
+    return DashboardShell(store, client, session, settings).view
 
 
 def create_panel_app(
-    settings: DashboardSettings, codec: SessionCodec
+    settings: DashboardSettings,
+    codec: SessionCodec,
+    store: StateStore,
+    client: ReadClient,
 ) -> Callable[[], pn.Column]:
     """Build the Panel application callable served by FastAPI."""
 
     def app() -> pn.Column:
-        return build_placeholder(pn.state.cookies, codec)
+        return build_view(pn.state.cookies, codec, store, client, settings)
 
     return app
