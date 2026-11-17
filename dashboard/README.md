@@ -59,7 +59,7 @@ scoped to that location. Figures left on "All locations" chart the whole series.
 | `DASHBOARD_SECRET_KEY` | required | Signs the session cookie |
 | `DASHBOARD_STATE_DIR` | `/var/lib/transducer-dashboard` | JSON state directory |
 | `DASHBOARD_SESSION_MAX_AGE` | `28800` | Session lifetime (seconds) |
-| `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Initial chart range |
+| `DASHBOARD_DEFAULT_WINDOW_DAYS` | `7` | Range for new figures (`<=1` → 24h, `<=7` → 7d, otherwise 30d) |
 | `DASHBOARD_MAX_POINTS` | `2000` | Chart point cap |
 | `DASHBOARD_COOKIE_SECURE` | `true` | Set `false` only for plain-HTTP local development |
 | `SITE_TIMEZONE` | `America/New_York` | Range calculation time zone |

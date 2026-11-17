@@ -182,9 +182,16 @@ def find_free_slot(
 
 
 def add_figure(
-    state: dict[str, Any], scene_id: str, x: int, y: int
+    state: dict[str, Any],
+    scene_id: str,
+    x: int,
+    y: int,
+    *,
+    range_key: str = DEFAULT_RANGE,
 ) -> dict[str, Any]:
     scene = get_scene(state, scene_id)
+    if range_key not in RANGES:
+        raise SceneError(f"unknown range {range_key!r}")
     if isinstance(x, bool) or not isinstance(x, int) or x < 0:
         raise SceneError("x must be a non-negative integer")
     if isinstance(y, bool) or not isinstance(y, int) or y < 0:
@@ -207,7 +214,7 @@ def add_figure(
         "title": DEFAULT_FIGURE_TITLE,
         "location_id": None,
         "series_id": None,
-        "range": DEFAULT_RANGE,
+        "range": range_key,
         "layout": {"x": x, "y": y, "w": width, "h": height},
         "created_at": now,
         "updated_at": now,

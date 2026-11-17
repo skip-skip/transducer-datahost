@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 import panel as pn
 import pytest
@@ -83,7 +84,10 @@ class FakeReadClient:
 
 
 def make_shell(
-    tmp_path, label: str = "alice", token: str = "good"
+    tmp_path,
+    label: str = "alice",
+    token: str = "good",
+    default_window_days: int = 7,
 ) -> tuple[DashboardShell, StateStore]:
     store = StateStore(tmp_path)
     store.ensure()
@@ -91,6 +95,7 @@ def make_shell(
         read_api_url="http://read-api:8080",
         secret_key="x" * 32,
         state_dir=tmp_path,
+        default_window_days=default_window_days,
         cookie_secure=False,
     )
     shell = DashboardShell(
@@ -781,8 +786,11 @@ def test_saving_a_selection_renders_a_bokeh_chart(tmp_path) -> None:
     assert isinstance(shell.figure_cards[figure["id"]].chart, pn.pane.Bokeh)
 
 
+@pytest.mark.parametrize(
+    ("range_key", "hours"), [("24h", 24), ("7d", 24 * 7), ("30d", 24 * 30)]
+)
 def test_a_chart_requests_the_configured_window_and_point_cap(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, range_key: str, hours: int
 ) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
@@ -796,6 +804,7 @@ def test_a_chart_requests_the_configured_window_and_point_cap(
     monkeypatch.setattr(shell.client, "points", points)
     shell.settings_analyte.value = "10"
     shell.settings_location.value = "1"
+    shell.settings_range.value = range_key
     shell.settings_save.clicks += 1
 
     assert len(calls) == 1
@@ -803,7 +812,10 @@ def test_a_chart_requests_the_configured_window_and_point_cap(
     assert calls[0]["points"] == 2000
     assert calls[0]["tz"] == "local"
     assert calls[0]["location_id"] == 1
-    assert calls[0]["start"] < calls[0]["end"]
+    span = datetime.fromisoformat(calls[0]["end"]) - datetime.fromisoformat(
+        calls[0]["start"]
+    )
+    assert span.total_seconds() == hours * 3600
 
 
 def test_a_figure_without_data_shows_an_inline_message(tmp_path, monkeypatch) -> None:
@@ -871,3 +883,18 @@ def test_an_unconfigured_figure_shows_the_choose_prompt(tmp_path) -> None:
     chart = shell.figure_cards[figure["id"]].chart
     assert isinstance(chart, pn.pane.HTML)
     assert "Choose a location and analyte" in chart.object
+
+
+@pytest.mark.parametrize(
+    ("days", "expected"), [(1, "24h"), (7, "7d"), (30, "30d")]
+)
+def test_new_figures_use_the_configured_default_range(
+    tmp_path, days: int, expected: str
+) -> None:
+    shell, _ = make_shell(tmp_path, default_window_days=days)
+    shell.create_scene()
+
+    figure = shell.create_figure(0, 0)
+
+    assert figure is not None
+    assert figure["range"] == expected

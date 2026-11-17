@@ -324,6 +324,14 @@ class DashboardShell:
         self._clear_status()
         self._update_selection()
 
+    def _default_range(self) -> str:
+        days = self.settings.default_window_days
+        if days <= 1:
+            return "24h"
+        if days <= 7:
+            return "7d"
+        return "30d"
+
     def create_figure(self, x: int, y: int) -> dict[str, Any] | None:
         scene_id = self._selected_scene_id
         if scene_id is None:
@@ -331,7 +339,9 @@ class DashboardShell:
         label = self.session.label
 
         def operation(data: dict[str, Any]) -> dict[str, Any]:
-            figure = scenes.add_figure(data, scene_id, x, y)
+            figure = scenes.add_figure(
+                data, scene_id, x, y, range_key=self._default_range()
+            )
             scenes.set_ui(
                 data,
                 label,

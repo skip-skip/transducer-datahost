@@ -104,6 +104,17 @@ def test_add_figure_places_a_minimum_size_figure() -> None:
     validate_state(state)
 
 
+def test_add_figure_uses_the_requested_default_range() -> None:
+    state = default_state()
+    scene = make_scene(state)
+
+    figure = scenes.add_figure(state, scene["id"], 0, 0, range_key="24h")
+
+    assert figure["range"] == "24h"
+    with pytest.raises(scenes.SceneError, match="range"):
+        scenes.add_figure(state, scene["id"], 3, 0, range_key="1y")
+
+
 def test_add_figure_uses_the_first_free_slot_when_the_cell_is_taken() -> None:
     state = default_state()
     scene = make_scene(state)
