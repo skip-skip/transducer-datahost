@@ -9,7 +9,6 @@ ENV_VARS = (
     "DASHBOARD_SESSION_MAX_AGE",
     "DASHBOARD_DEFAULT_WINDOW_DAYS",
     "DASHBOARD_MAX_POINTS",
-    "DASHBOARD_SHARED_EDITORS",
     "SITE_TIMEZONE",
     "DASHBOARD_COOKIE_SECURE",
     "DASHBOARD_REQUEST_TIMEOUT",
@@ -51,7 +50,6 @@ def test_defaults(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     assert settings.session_max_age == 28_800
     assert settings.default_window_days == 7
     assert settings.max_points == 2_000
-    assert settings.shared_editors == frozenset()
     assert settings.cookie_secure is True
 
 
@@ -63,7 +61,6 @@ def test_parses_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("DASHBOARD_SESSION_MAX_AGE", "60")
     monkeypatch.setenv("DASHBOARD_DEFAULT_WINDOW_DAYS", "30")
     monkeypatch.setenv("DASHBOARD_MAX_POINTS", "500")
-    monkeypatch.setenv("DASHBOARD_SHARED_EDITORS", "alice, bob,")
     monkeypatch.setenv("DASHBOARD_COOKIE_SECURE", "false")
     monkeypatch.setenv("DASHBOARD_REQUEST_TIMEOUT", "5")
 
@@ -73,6 +70,5 @@ def test_parses_overrides(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     assert settings.session_max_age == 60
     assert settings.default_window_days == 30
     assert settings.max_points == 500
-    assert settings.shared_editors == frozenset({"alice", "bob"})
     assert settings.cookie_secure is False
     assert settings.request_timeout == 5.0

@@ -93,7 +93,7 @@ attached only to internal networks.
 | Migrate | Create/update roles and apply `db/migrations` | Linux VM, Docker (one-shot) |
 | PostgreSQL | Durable store, deduplication keys, queue, audit trail | Linux VM, Docker |
 | Read API | Read-only REST access with local/UTC time handling | Linux VM, Docker |
-| Dashboard | Server-rendered figures over the read API; personal/shared JSON state | Linux VM, Docker |
+| Dashboard | Panel scene workspace over the read API; shared JSON state | Linux VM, Docker |
 | Consumers | Analysts using the read API or the dashboard | Internal network |
 
 ## 5. Data flow

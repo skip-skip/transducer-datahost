@@ -32,11 +32,6 @@ def _env_bool(name: str, default: bool) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _env_list(name: str) -> frozenset[str]:
-    raw = os.environ.get(name, "")
-    return frozenset(item.strip() for item in raw.split(",") if item.strip())
-
-
 @dataclass(frozen=True)
 class DashboardSettings:
     read_api_url: str
@@ -45,7 +40,6 @@ class DashboardSettings:
     session_max_age: int = 28_800
     default_window_days: int = 7
     max_points: int = 2_000
-    shared_editors: frozenset[str] = frozenset()
     site_timezone: str = DEFAULT_SITE_TIMEZONE
     cookie_secure: bool = True
     request_timeout: float = 15.0
@@ -73,7 +67,6 @@ class DashboardSettings:
             session_max_age=_env_int("DASHBOARD_SESSION_MAX_AGE", 28_800),
             default_window_days=_env_int("DASHBOARD_DEFAULT_WINDOW_DAYS", 7),
             max_points=_env_int("DASHBOARD_MAX_POINTS", 2_000),
-            shared_editors=_env_list("DASHBOARD_SHARED_EDITORS"),
             site_timezone=os.environ.get("SITE_TIMEZONE", DEFAULT_SITE_TIMEZONE),
             cookie_secure=_env_bool("DASHBOARD_COOKIE_SECURE", True),
             request_timeout=float(os.environ.get("DASHBOARD_REQUEST_TIMEOUT", "15")),

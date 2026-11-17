@@ -164,7 +164,7 @@ Linux VM, the TLS certificate, and the production backfill remain.
 - Runbook reviewed by the operator.
 - Certificate rotation rehearsed.
 
-## Phase 8 — Dashboard (implemented; VM verification pending)
+## Phase 8 — Dashboard v1 (superseded by Phase 9)
 
 **Deliverables**
 
@@ -189,8 +189,8 @@ Linux VM, the TLS certificate, and the production backfill remain.
 
 - [ ] Login with a read token; invalid tokens are rejected and revoked tokens return to
   login.
-- [ ] Personal and shared figures are isolated as designed; shared edits respect
-  `DASHBOARD_SHARED_EDITORS`.
+- [ ] Personal and shared figures are isolated as designed. Phase 9 replaces this model
+  with shared scenes and removes the editor allowlist.
 - [ ] Creating, renaming, re-binding, and deleting figures works and survives a container
   restart.
 - [ ] Charts render for 24h/7d/30d, including high-frequency aquifer-test series within
@@ -210,9 +210,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   `panel.io.fastapi.add_applications`.
 - [x] Jinja templates, HTMX, Plotly, vendored GridStack assets, and the `node --check`
   verification step are removed. The image stays Python-only.
-- [ ] State version 2: shared scenes, each a collection of gridded figures. A version 1
+- [x] State version 2: shared scenes, each a collection of gridded figures. A version 1
   `state.json` is archived as `state.v1.json` and replaced with an empty v2 document.
-- [ ] Scene domain operations: create and delete scenes; per-user selected scene and tray
+- [x] Scene domain operations: create and delete scenes; per-user selected scene and tray
   state.
 - [ ] Collapsible scene tray listing all shared scenes, with create and confirmed delete.
 - [ ] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
@@ -225,8 +225,8 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   inline error states.
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
-- [ ] Tests for state v2, scene/figure operations, the Panel mount, callbacks, and the
-  chart builder.
+- [x] Tests for state v2, scene/figure operations, and the Panel mount.
+- [ ] Tests for the Panel callbacks and the chart builder.
 
 **Exit criteria**
 

@@ -155,9 +155,8 @@ Copy `.env.example` to `.env`. The main groups are:
 - **Tokens:** `INGEST_API_TOKENS` and `READ_API_TOKENS` as comma-separated
   `label:token` pairs. The upload host also sets `INGEST_API_TOKEN` and
   `INGEST_API_URL`. The dashboard uses the same read tokens for login.
-- **Dashboard:** `DASHBOARD_SECRET_KEY` signs the session cookie; optional
-  `DASHBOARD_SHARED_EDITORS` restricts who may edit shared figures. The dashboard has no
-  database credentials.
+- **Dashboard:** `DASHBOARD_SECRET_KEY` signs the session cookie. Scenes are shared
+  between all read tokens. The dashboard has no database credentials.
 - **Limits:** `MAX_UPLOAD_BYTES`, `READ_MAX_ROWS`, `READ_MAX_WINDOW_DAYS`,
   `DASHBOARD_MAX_POINTS`, worker retry/heartbeat settings, and spool retention.
 

@@ -1,8 +1,13 @@
 """Durable dashboard state stored as a single JSON file on a Docker volume.
 
 The dashboard deliberately keeps its state out of PostgreSQL. Every read-modify-
-write cycle takes a file lock, writes a temporary file, fsyncs it, keeps the
-previous version as ``state.json.bak``, and atomically replaces ``state.json``.
+write cycle takes a process-wide re-entrant lock and a file lock, writes a
+temporary file, fsyncs it, keeps the previous version as ``state.json.bak``, and
+atomically replaces ``state.json``.
+
+Version 1 documents (personal/shared figures) are archived to ``state.v1.json``
+and replaced with a fresh version 2 document. Version 1 personal figures are
+never published into the shared scenes of version 2.
 """
 
 from __future__ import annotations
@@ -10,16 +15,46 @@ from __future__ import annotations
 import json
 import os
 import shutil
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
 
 from filelock import FileLock
 
-STATE_VERSION = 1
+STATE_VERSION = 2
 STATE_FILENAME = "state.json"
 BACKUP_FILENAME = "state.json.bak"
+ARCHIVE_V1_FILENAME = "state.v1.json"
 LOCK_FILENAME = ".state.lock"
+
+# Grid configuration for the MVP. Per-scene grids are a follow-up.
+GRID_COLUMNS = 12
+GRID_ROW_HEIGHT = 220
+MIN_FIGURE_WIDTH = 3
+MIN_FIGURE_HEIGHT = 2
+
+RANGES = ("24h", "7d", "30d")
+DEFAULT_RANGE = "7d"
+
+STATE_KEYS = frozenset({"version", "scenes", "ui"})
+SCENE_KEYS = frozenset({"id", "name", "figures", "created_at", "updated_at"})
+FIGURE_KEYS = frozenset(
+    {
+        "id",
+        "title",
+        "location_id",
+        "series_id",
+        "range",
+        "layout",
+        "created_at",
+        "updated_at",
+    }
+)
+LAYOUT_KEYS = frozenset({"x", "y", "w", "h"})
+UI_KEYS = frozenset(
+    {"selected_scene_id", "selected_figure_id", "scenes_tray_collapsed"}
+)
 
 
 class StateError(RuntimeError):
@@ -28,42 +63,131 @@ class StateError(RuntimeError):
 
 def default_ui() -> dict[str, Any]:
     return {
-        "view": "personal",
-        "personal": {"selected_figure_id": None, "folders_collapsed": False},
-        "shared": {"selected_figure_id": None, "folders_collapsed": False},
-        "tz": "local",
+        "selected_scene_id": None,
+        "selected_figure_id": None,
+        "scenes_tray_collapsed": False,
     }
 
 
 def default_state() -> dict[str, Any]:
-    return {
-        "version": STATE_VERSION,
-        "shared": {"figures": []},
-        "personal": {},
-    }
+    return {"version": STATE_VERSION, "scenes": [], "ui": {}}
 
 
-def _ensure_figure(figure: Any, where: str) -> dict[str, Any]:
+def _check_keys(
+    value: Mapping[Any, Any],
+    allowed: frozenset[str],
+    where: str,
+    *,
+    required: bool,
+) -> None:
+    keys = set(value)
+    unknown = sorted(str(key) for key in keys - allowed)
+    if unknown:
+        raise StateError(f"{where} has unknown keys: {', '.join(unknown)}")
+    if required:
+        missing = sorted(allowed - keys)
+        if missing:
+            raise StateError(f"{where} is missing keys: {', '.join(missing)}")
+
+
+def _non_empty_string(value: Any, where: str) -> str:
+    if not isinstance(value, str) or not value.strip():
+        raise StateError(f"{where} must be a non-empty string")
+    return value
+
+
+def _optional_string(value: Any, where: str) -> str | None:
+    if value is None:
+        return None
+    if not isinstance(value, str) or not value.strip():
+        raise StateError(f"{where} must be a non-empty string or null")
+    return value
+
+
+def _integer(value: Any, where: str) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise StateError(f"{where} must be an integer")
+    return value
+
+
+def _optional_int(value: Any, where: str) -> int | None:
+    if value is None:
+        return None
+    return _integer(value, where)
+
+
+def validate_layout(layout: Any, where: str = "layout") -> None:
+    if not isinstance(layout, dict):
+        raise StateError(f"{where} must be an object")
+    _check_keys(layout, LAYOUT_KEYS, where, required=True)
+
+    x = _integer(layout["x"], f"{where}.x")
+    y = _integer(layout["y"], f"{where}.y")
+    width = _integer(layout["w"], f"{where}.w")
+    height = _integer(layout["h"], f"{where}.h")
+
+    if x < 0 or y < 0:
+        raise StateError(f"{where}.x and {where}.y must be non-negative")
+    if width < MIN_FIGURE_WIDTH:
+        raise StateError(f"{where}.w must be at least {MIN_FIGURE_WIDTH}")
+    if height < MIN_FIGURE_HEIGHT:
+        raise StateError(f"{where}.h must be at least {MIN_FIGURE_HEIGHT}")
+    if x + width > GRID_COLUMNS:
+        raise StateError(f"{where} must fit within {GRID_COLUMNS} columns")
+
+
+def _validate_figure(figure: Any, where: str) -> None:
     if not isinstance(figure, dict):
         raise StateError(f"{where} must be an object")
-    for key in ("id", "name"):
-        if not isinstance(figure.get(key), str) or not figure[key].strip():
-            raise StateError(f"{where}.{key} must be a non-empty string")
-    series_id = figure.get("series_id")
-    if series_id is not None and not isinstance(series_id, int):
-        raise StateError(f"{where}.series_id must be an integer or null")
-    # Optional since location-based figure selection; figures saved before it
-    # (or explicitly un-scoped) carry no location and mean "all locations".
-    location_id = figure.get("location_id")
-    if location_id is not None and not isinstance(location_id, int):
-        raise StateError(f"{where}.location_id must be an integer or null")
-    position = figure.get("position", 0)
-    if not isinstance(position, int):
-        raise StateError(f"{where}.position must be an integer")
-    config = figure.get("config", {})
-    if not isinstance(config, dict):
-        raise StateError(f"{where}.config must be an object")
-    return figure
+    _check_keys(figure, FIGURE_KEYS, where, required=True)
+
+    _non_empty_string(figure["id"], f"{where}.id")
+    _non_empty_string(figure["title"], f"{where}.title")
+    _optional_int(figure["location_id"], f"{where}.location_id")
+    _optional_int(figure["series_id"], f"{where}.series_id")
+    if figure["range"] not in RANGES:
+        raise StateError(f"{where}.range must be one of {', '.join(RANGES)}")
+    validate_layout(figure["layout"], f"{where}.layout")
+    _non_empty_string(figure["created_at"], f"{where}.created_at")
+    _non_empty_string(figure["updated_at"], f"{where}.updated_at")
+
+
+def _validate_scene(scene: Any, where: str) -> None:
+    if not isinstance(scene, dict):
+        raise StateError(f"{where} must be an object")
+    _check_keys(scene, SCENE_KEYS, where, required=True)
+
+    _non_empty_string(scene["id"], f"{where}.id")
+    _non_empty_string(scene["name"], f"{where}.name")
+    _non_empty_string(scene["created_at"], f"{where}.created_at")
+    _non_empty_string(scene["updated_at"], f"{where}.updated_at")
+
+    figures = scene["figures"]
+    if not isinstance(figures, list):
+        raise StateError(f"{where}.figures must be a list")
+    seen: set[str] = set()
+    for index, figure in enumerate(figures):
+        figure_where = f"{where}.figures[{index}]"
+        _validate_figure(figure, figure_where)
+        figure_id = figure["id"]
+        if figure_id in seen:
+            raise StateError(f"{figure_where}.id is a duplicate")
+        seen.add(figure_id)
+
+
+def validate_ui(entry: Any, where: str = "ui") -> None:
+    if not isinstance(entry, dict):
+        raise StateError(f"{where} must be an object")
+    _check_keys(entry, UI_KEYS, where, required=False)
+
+    if "selected_scene_id" in entry:
+        _optional_string(entry["selected_scene_id"], f"{where}.selected_scene_id")
+    if "selected_figure_id" in entry:
+        _optional_string(entry["selected_figure_id"], f"{where}.selected_figure_id")
+    if "scenes_tray_collapsed" in entry and not isinstance(
+        entry["scenes_tray_collapsed"], bool
+    ):
+        raise StateError(f"{where}.scenes_tray_collapsed must be a boolean")
 
 
 def validate_state(data: Any) -> dict[str, Any]:
@@ -71,39 +195,49 @@ def validate_state(data: Any) -> dict[str, Any]:
         raise StateError("state must be a JSON object")
     if data.get("version") != STATE_VERSION:
         raise StateError(f"unsupported state version {data.get('version')!r}")
+    _check_keys(data, STATE_KEYS, "state", required=True)
 
-    shared = data.get("shared")
-    if not isinstance(shared, dict) or not isinstance(shared.get("figures"), list):
-        raise StateError("state.shared.figures must be a list")
-    for index, figure in enumerate(shared["figures"]):
-        _ensure_figure(figure, f"state.shared.figures[{index}]")
+    scenes = data["scenes"]
+    if not isinstance(scenes, list):
+        raise StateError("state.scenes must be a list")
 
-    personal = data.get("personal")
-    if not isinstance(personal, dict):
-        raise StateError("state.personal must be an object")
-    for label, entry in personal.items():
-        if not isinstance(label, str):
-            raise StateError("state.personal keys must be strings")
-        if not isinstance(entry, dict):
-            raise StateError(f"state.personal[{label!r}] must be an object")
-        if not isinstance(entry.get("figures"), list):
-            raise StateError(f"state.personal[{label!r}].figures must be a list")
-        for index, figure in enumerate(entry["figures"]):
-            _ensure_figure(figure, f"state.personal[{label!r}].figures[{index}]")
-        ui = entry.get("ui")
-        if ui is not None and not isinstance(ui, dict):
-            raise StateError(f"state.personal[{label!r}].ui must be an object")
+    scene_ids: set[str] = set()
+    figure_ids: set[str] = set()
+    for index, scene in enumerate(scenes):
+        where = f"state.scenes[{index}]"
+        _validate_scene(scene, where)
+        scene_id = scene["id"]
+        if scene_id in scene_ids:
+            raise StateError(f"{where}.id is a duplicate")
+        scene_ids.add(scene_id)
+        for figure in scene["figures"]:
+            figure_id = figure["id"]
+            if figure_id in figure_ids:
+                raise StateError(f"figure id {figure_id!r} is a duplicate")
+            figure_ids.add(figure_id)
+
+    ui = data["ui"]
+    if not isinstance(ui, dict):
+        raise StateError("state.ui must be an object")
+    for label, entry in ui.items():
+        if not isinstance(label, str) or not label.strip():
+            raise StateError("state.ui keys must be non-empty strings")
+        validate_ui(entry, f"state.ui[{label!r}]")
 
     return data
 
 
 class StateStore:
+    """Load, validate, and atomically persist the dashboard state file."""
+
     def __init__(self, directory: Path | str) -> None:
         self.directory = Path(directory)
         self.path = self.directory / STATE_FILENAME
         self.backup_path = self.directory / BACKUP_FILENAME
+        self.archive_v1_path = self.directory / ARCHIVE_V1_FILENAME
         self.lock_path = self.directory / LOCK_FILENAME
         self._lock = FileLock(str(self.lock_path))
+        self._mutex = threading.RLock()
 
     def ensure(self) -> None:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -111,27 +245,39 @@ class StateStore:
             os.chmod(self.directory, 0o700)
         except OSError:
             pass
-        with self._lock:
+        with self._mutex, self._lock:
             if not self.path.exists():
-                self._write(default_state())
+                self._write_unlocked(default_state())
+            else:
+                self._load_unlocked()
 
     def load(self) -> dict[str, Any]:
-        with self._lock:
+        with self._mutex, self._lock:
             return self._load_unlocked()
 
     def mutate(
         self, operation: Callable[[dict[str, Any]], Any]
     ) -> tuple[dict[str, Any], Any]:
-        with self._lock:
+        with self._mutex, self._lock:
             data = self._load_unlocked()
             result = operation(data)
             validate_state(data)
-            self._write(data)
+            self._write_unlocked(data)
             return data, result
 
     def _load_unlocked(self) -> dict[str, Any]:
         if not self.path.exists():
             return default_state()
+        data = self._read_unlocked()
+        version = data.get("version")
+        if isinstance(version, int) and not isinstance(version, bool) and version == 1:
+            self._archive_v1_unlocked()
+            fresh = default_state()
+            self._write_unlocked(fresh)
+            return fresh
+        return validate_state(data)
+
+    def _read_unlocked(self) -> dict[str, Any]:
         try:
             raw = self.path.read_text(encoding="utf-8")
         except OSError as exc:
@@ -140,9 +286,17 @@ class StateStore:
             data = json.loads(raw)
         except json.JSONDecodeError as exc:
             raise StateError(f"{self.path} is not valid JSON: {exc}") from exc
-        return validate_state(data)
+        if not isinstance(data, dict):
+            raise StateError("state must be a JSON object")
+        return data
 
-    def _write(self, data: dict[str, Any]) -> None:
+    def _archive_v1_unlocked(self) -> None:
+        try:
+            shutil.copy2(self.path, self.archive_v1_path)
+        except OSError as exc:
+            raise StateError(f"cannot archive version 1 state: {exc}") from exc
+
+    def _write_unlocked(self, data: dict[str, Any]) -> None:
         validate_state(data)
         text = json.dumps(data, indent=2, sort_keys=False) + "\n"
         temporary = self.path.with_name(self.path.name + ".tmp")
