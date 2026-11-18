@@ -203,8 +203,9 @@ Figure settings drawer:
 - `Save` rejects a blank title, a missing analyte, a series that does not exist,
   and a location/series pair with no readings together.
 - `Delete figure` takes two clicks (delete, then confirm).
-- Its collapse state is per browser session and resets on reload. Selecting a
-  figure (or creating one) opens the drawer.
+- Its collapse state is per browser session and resets on reload. Selecting or
+  creating a figure updates the drawer contents without changing its open state;
+  only the drawer tab toggles it.
 
 Scene canvas (right of the drawers):
 
@@ -384,7 +385,8 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings drawer opens.
+4. Click a ribbon; the figure highlights and the settings drawer keeps its
+   current open/closed state.
 5. Collapse each drawer independently. The scenes drawer stays collapsed after a
    reload; the settings drawer resets to open.
 6. Drag and resize a figure; the layout survives a reload and a restart.

@@ -20,7 +20,8 @@ FastAPI service. The MVP deliberately stays small:
 - Clicking an empty grid cell creates a new figure at the minimum size.
 - A figure has a title ribbon. Clicking the ribbon selects the figure; dragging
   the ribbon moves it within the grid.
-- Selecting a figure highlights it and opens the settings drawer.
+- Selecting a figure highlights it and populates the settings drawer. The
+  drawer opens only from its tab.
 - Only time-series figures are implemented.
 
 Non-goals for this MVP:
@@ -284,24 +285,33 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
 A custom shell is preferred over a Panel template for the MVP because it keeps
 the rail simple and avoids template resource dependencies. Two independent
 `pn.Card`s are used instead of one `pn.Accordion` so the scenes and settings
-collapse states stay independent; selecting a figure opens the settings drawer.
+collapse states stay independent; selecting a figure populates the settings
+drawer without changing its open state.
 
-Panel 1.10 has no built-in drawer component, so each card is restyled as a
-full-height ribbon. The rail is a `pn.Row` of cards docked to the left edge of a
-full-height flex column: scenes is leftmost and figure settings sits immediately
-to its right. Each card's shadow root is a flex row with a 44 px vertical tab and
-a 340 px body that opens to the right; the tab and body stretch to the full
-height of the rail below the header, and the body scrolls when its content is
-taller than the viewport. The tab title is a custom header pane with
-`writing-mode: vertical-rl` so it reads bottom-to-top; Panel's built-in chevron
-points right while the drawer is closed and down while it is open. Because the
-drawers stay in flow left-to-right, opening scenes pushes the settings drawer and
-the canvas right, and opening settings pushes the canvas. The rail gets inline
-`flex: 0 0 auto`, `width: max-content`, and `height: 100%`; the canvas uses
-`sizing_mode="stretch_both"`. A rail stylesheet overrides Panel's computed
-`min-width: 300px` so both closed tabs measure 88 px. Inline styles are required
-for the rail and canvas because they live inside nested Bokeh shadow roots,
-where shell stylesheets do not reach.
+Panel 1.10's only built-in drawer is `pn.ui.Drawer`, a Material UI component
+re-exported from `panel-material-ui`. Its `docked` + `inline` mode does not fit
+this rail: the dock tab is a 24 x 48 px chevron-only control with no title, a
+closed drawer collapses to 0 px of layout width and positions its tab at
+`right: -24px` (so two closed drawers overlap), and `dock_icon` is ignored in
+inline mode. Using it would also switch the session to the Material design and
+raise the dependency floor from Panel 1.5 to 1.10. A hybrid using
+`variant="persistent"` for the body with custom tabs was considered too, but it
+still pulls in the Material dependency and design for no geometry gain. Each
+card is therefore restyled as a full-height ribbon. The rail is a `pn.Row` of
+cards docked to the left edge of a full-height flex column: scenes is leftmost
+and figure settings sits immediately to its right. Each card's shadow root is a
+flex row with a 44 px vertical tab and a 340 px body that opens to the right;
+the tab and body stretch to the full height of the rail below the header, and
+the body scrolls when its content is taller than the viewport. The tab title is
+a custom header pane with `writing-mode: vertical-rl` so it reads bottom-to-top;
+Panel's built-in chevron points right while the drawer is closed and down while
+it is open. Because the drawers stay in flow left-to-right, opening scenes
+pushes the settings drawer and the canvas right, and opening settings pushes the
+canvas. The rail gets inline `flex: 0 0 auto`, `width: max-content`, and
+`height: 100%`; the canvas uses `sizing_mode="stretch_both"`. A rail stylesheet
+overrides Panel's computed `min-width: 300px` so both closed tabs measure 88 px.
+Inline styles are required for the rail and canvas because they live inside
+nested Bokeh shadow roots, where shell stylesheets do not reach.
 
 ## 7. Grid interaction specification
 
@@ -415,7 +425,8 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings drawer opens.
+4. Click a ribbon; the figure highlights and the settings drawer keeps its
+   current open/closed state.
 5. Drag a ribbon; the figure moves and the layout survives a reload and a
    container restart.
 6. Resize a figure; the minimum size is enforced and the layout persists.

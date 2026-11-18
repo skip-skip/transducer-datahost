@@ -568,29 +568,36 @@ def test_the_ribbon_selects_the_figure_and_updates_the_settings_card(tmp_path) -
     assert first["title"] in shell.settings_title.value
 
 
-def test_selecting_a_figure_expands_the_settings_card(tmp_path) -> None:
+def test_selecting_a_figure_does_not_change_the_settings_card(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
     first = shell.create_figure(0, 0)
     second = shell.create_figure(3, 0)
     assert first is not None
     assert second is not None
-    shell.settings_card.collapsed = True
 
+    shell.settings_card.collapsed = True
     shell.figure_cards[first["id"]].ribbon.clicks += 1
 
     assert shell.selected_figure_id == first["id"]
+    assert shell.settings_card.collapsed is True
+    assert first["title"] in shell.settings_title.value
+
+    shell.settings_card.collapsed = False
+    shell.figure_cards[second["id"]].ribbon.clicks += 1
+
+    assert shell.selected_figure_id == second["id"]
     assert shell.settings_card.collapsed is False
 
 
-def test_creating_a_figure_expands_the_settings_card(tmp_path) -> None:
+def test_creating_a_figure_does_not_change_the_settings_card(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
     shell.settings_card.collapsed = True
 
     shell.create_figure(0, 0)
 
-    assert shell.settings_card.collapsed is False
+    assert shell.settings_card.collapsed is True
 
 
 def test_figure_selection_persists_per_user(tmp_path) -> None:

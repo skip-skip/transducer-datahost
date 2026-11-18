@@ -424,12 +424,6 @@ class DashboardShell:
         self._tray_collapsed = bool(event.new)
         self._save_ui()
 
-    def _set_settings_collapsed(self, collapsed: bool) -> None:
-        self._settings_collapsed = collapsed
-        card = self.settings_card
-        if card is not None and card.collapsed != collapsed:
-            card.collapsed = collapsed
-
     def _on_settings_toggle(self, event: Any) -> None:
         self._settings_collapsed = bool(event.new)
 
@@ -493,7 +487,6 @@ class DashboardShell:
 
         self._selected_figure_id = figure["id"]
         self._delete_confirm = False
-        self._settings_collapsed = False
         self._clear_status()
         self.refresh()
         return figure
@@ -551,8 +544,6 @@ class DashboardShell:
     def _update_selection(self) -> None:
         for figure_id, card in self._figure_cards.items():
             card.set_selected(figure_id == self._selected_figure_id)
-        if self._selected_figure_id is not None:
-            self._set_settings_collapsed(False)
         if self.settings_body is not None:
             self._fill_settings()
 
