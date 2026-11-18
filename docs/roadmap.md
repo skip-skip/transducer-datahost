@@ -224,13 +224,14 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   `state.v2-legacy.json`.
 - [x] Scene domain operations: create and delete scenes; per-user selected scene and
   scenes drawer collapse state.
-- [x] Left drawer rail with vertical tabs; the scenes drawer opens to the right over
-  the canvas and lists all shared scenes, with create and confirmed delete.
+- [x] Left ribbon rail with full-height vertical tabs stacked left-to-right; the scenes
+  drawer is leftmost and opens to the right, pushing the settings drawer and the canvas.
+  It lists all shared scenes, with create and confirmed delete.
 - [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
   Clicking an empty cell creates a minimum-size figure there.
 - [x] Figure title ribbon: click selects and highlights the figure and opens the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
-- [x] Settings drawer with a vertical tab that opens to the right over the canvas:
+- [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:
   title, location (including "All locations"), analyte, range (24h/7d/30d), save, and
   confirmed delete. Its collapse state is per session; selecting a figure opens it.
 - [x] Bokeh time-series charts for every figure in the selected scene, with loading and

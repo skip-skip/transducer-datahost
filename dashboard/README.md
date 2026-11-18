@@ -27,11 +27,13 @@ In the browser, click an empty grid cell to add a figure, click its title ribbon
 to select it and open the settings drawer, and drag the ribbon to move it. Layout
 changes are saved immediately to the shared state.
 
-The two rail drawers (scenes and figure settings) are left-docked: their
-titles are vertical tabs in a 44 px strip at the left edge, and opening one
-reveals a 340 px body to the right over the canvas. Open bodies stay in flow, so
-they push the next tab down instead of overlapping. The tab strip paints above
-the canvas so open drawers cover the charts underneath.
+The two rail drawers (scenes and figure settings) are full-height ribbons on
+the left edge. Scenes is the leftmost tab and figure settings sits immediately
+to its right. Each title is a vertical 44 px tab; opening a drawer reveals a
+340 px body to the right whose content scrolls within the viewport. The drawers
+stay in flow left-to-right, so opening scenes pushes the settings drawer and the
+canvas right, and opening settings pushes the canvas. Both drawers can be open
+at once, and both span the full height below the header.
 
 The settings drawer edits the title, location, analyte, and range (`24h`, `7d`,
 `30d`). Saving verifies the analyte against the read API: an unknown series is

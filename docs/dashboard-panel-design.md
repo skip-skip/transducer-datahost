@@ -11,8 +11,9 @@ once the implementation lands.
 The dashboard becomes a Python-only Panel application mounted inside the existing
 FastAPI service. The MVP deliberately stays small:
 
-- A left rail of vertical drawer tabs holds two cards, **scenes** and the
-  selected figure's **settings**, whose bodies open to the right over the canvas.
+- A left rail of full-height ribbon drawers holds two cards, **scenes** and the
+  selected figure's **settings**. Scenes is leftmost; each body opens to the
+  right and pushes the next drawer and the canvas right.
 - A scene is a named collection of figures placed in a gridded canvas.
 - Scenes can be created and deleted.
 - **All scenes are shared between all users.** There are no personal scenes.
@@ -257,8 +258,9 @@ personal/shared split and no editor allowlist in the MVP.
 
 ```text
 Shell (custom pn.Row / pn.Column with self-hosted CSS)
-├── Left drawer rail (44 px vertical tabs, two independent right-opening drawers)
-│   ├── Scenes drawer (collapse persists per token label)
+├── Left ribbon rail (44 px vertical tabs, two independent right-opening drawers,
+│   stacked left-to-right and spanning the viewport height)
+│   ├── Scenes drawer (leftmost; collapse persists per token label)
 │   │   ├── Scene list (selected scene highlighted)
 │   │   ├── + New scene
 │   │   └── Delete scene (with confirm step)
@@ -285,16 +287,21 @@ the rail simple and avoids template resource dependencies. Two independent
 collapse states stay independent; selecting a figure opens the settings drawer.
 
 Panel 1.10 has no built-in drawer component, so each card is restyled as a
-left-docked drawer. Its shadow root is a flex row with a 44 px vertical tab and
-a 340 px body that opens to the right. The tab title is a custom header pane
-with `writing-mode: vertical-rl` so it reads bottom-to-top; Panel's built-in
-chevron points right while the drawer is closed. The body stays in flow rather
-than absolutely positioned, so an open body reserves vertical space in the tab
-strip and pushes the next tab down instead of overlapping it; both drawers can
-be open together. The rail is given inline `position: relative; z-index: 2` and
-the canvas `position: relative; z-index: 1` so open drawers paint above the
-Bokeh charts. Inline styles are required for the rail and canvas because they
-live inside nested Bokeh shadow roots, where shell stylesheets do not reach.
+full-height ribbon. The rail is a `pn.Row` of cards docked to the left edge of a
+full-height flex column: scenes is leftmost and figure settings sits immediately
+to its right. Each card's shadow root is a flex row with a 44 px vertical tab and
+a 340 px body that opens to the right; the tab and body stretch to the full
+height of the rail below the header, and the body scrolls when its content is
+taller than the viewport. The tab title is a custom header pane with
+`writing-mode: vertical-rl` so it reads bottom-to-top; Panel's built-in chevron
+points right while the drawer is closed and down while it is open. Because the
+drawers stay in flow left-to-right, opening scenes pushes the settings drawer and
+the canvas right, and opening settings pushes the canvas. The rail gets inline
+`flex: 0 0 auto`, `width: max-content`, and `height: 100%`; the canvas uses
+`sizing_mode="stretch_both"`. A rail stylesheet overrides Panel's computed
+`min-width: 300px` so both closed tabs measure 88 px. Inline styles are required
+for the rail and canvas because they live inside nested Bokeh shadow roots,
+where shell stylesheets do not reach.
 
 ## 7. Grid interaction specification
 
@@ -430,8 +437,9 @@ asset.
    local resources.
 3. **State v2 and domain:** schema, validation, v1 archive, scene/figure CRUD,
    layout, tests.
-4. **Scene shell:** left drawer rail with vertical scenes and settings tabs whose
-   bodies open to the right, scene create/delete.
+4. **Scene shell:** left ribbon rail with full-height vertical scenes and settings
+   tabs whose bodies open to the right and push the next drawer, scene
+   create/delete.
 5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
    selection, layout persistence.
 6. **Figure settings and charts:** title/location/analyte/range/delete, Bokeh

@@ -12,6 +12,7 @@ from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
 from transducer_dashboard.workspace import (
     DRAWER_CSS,
     DRAWER_TITLE_CSS,
+    RAIL_CSS,
     RAIL_TAB_WIDTH,
     DashboardShell,
 )
@@ -125,7 +126,7 @@ def test_empty_state_shows_the_create_prompt(tmp_path) -> None:
     assert shell.rail.objects == [shell.tray_card, shell.settings_card]
 
 
-def test_rail_drawers_open_to_the_right(tmp_path) -> None:
+def test_rail_is_a_full_height_ribbon_row(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
     for card, body in (
@@ -142,14 +143,35 @@ def test_rail_drawers_open_to_the_right(tmp_path) -> None:
         assert card.header.stylesheets == [DRAWER_TITLE_CSS]
 
     assert "flex-direction: row" in DRAWER_CSS
+    assert f"flex: 0 0 {RAIL_TAB_WIDTH}px" in DRAWER_CSS
+    assert "align-self: stretch" in DRAWER_CSS
+    assert "overflow-y: auto" in DRAWER_CSS
     assert "writing-mode: vertical-rl" in DRAWER_TITLE_CSS
     assert shell.rail is not None
-    assert shell.rail.width == RAIL_TAB_WIDTH
-    assert shell.rail.styles == {
-        "position": "relative",
-        "z-index": "2",
-        "overflow": "visible",
-    }
+    assert isinstance(shell.rail, pn.Row)
+    assert shell.rail.objects == [shell.tray_card, shell.settings_card]
+    assert shell.rail.stylesheets == [RAIL_CSS]
+    assert shell.rail.styles["flex"] == "0 0 auto"
+    assert shell.rail.styles["width"] == "max-content"
+    assert shell.rail.styles["height"] == "100%"
+    assert shell.view.styles["height"] == "100vh"
+
+
+def test_scenes_ribbon_is_left_of_the_settings_ribbon(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.rail.objects == [shell.tray_card, shell.settings_card]
+    assert shell.tray_card.header.object is not None
+    assert "Scenes" in shell.tray_card.header.object
+    assert "Figure settings" in shell.settings_card.header.object
+
+
+def test_the_rail_overrides_the_panel_minimum_width(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.rail.stylesheets == [RAIL_CSS]
+    assert "min-width: 0 !important" in RAIL_CSS
+    assert "width: max-content !important" in RAIL_CSS
 
 
 def test_create_scene_selects_and_persists_it(tmp_path) -> None:

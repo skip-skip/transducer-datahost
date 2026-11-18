@@ -172,15 +172,17 @@ Write safety:
 
 ## 4. UI
 
-Left rail (two independent left-docked drawers):
+Left rail (two independent full-height ribbon drawers):
 
-The rail is a 44 px strip of vertical tabs at the left edge of the page. Each
-card title reads bottom-to-top, and its arrow points right when the drawer is
-closed. Opening a card reveals a 340 px body to the right over the canvas; the
-body stays in flow, so an open body reserves its height in the tab strip and
-pushes the next tab down instead of overlapping it. Both drawers can be open at
-once. The tab strip paints above the canvas so an open body covers the charts
-underneath.
+The rail is a row of vertical tabs docked to the left edge of the page. Scenes
+is the leftmost tab and figure settings is immediately to its right. Each title
+reads bottom-to-top, and its arrow points right when the drawer is closed and
+down when it is open. Opening a drawer reveals a 340 px body to the right; the
+tab and the body both span the full height of the viewport below the header, and
+the body scrolls when its content is taller than the screen. Drawers stay in
+flow left-to-right, so opening scenes pushes the settings drawer and the canvas
+to the right, and opening settings pushes the canvas. Both drawers can be open
+at once.
 
 Scenes drawer:
 
@@ -204,7 +206,7 @@ Figure settings drawer:
 - Its collapse state is per browser session and resets on reload. Selecting a
   figure (or creating one) opens the drawer.
 
-Scene canvas (right of the rail):
+Scene canvas (right of the drawers):
 
 - A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
 - Clicking an empty cell creates a minimum-size figure at that cell. If the cell

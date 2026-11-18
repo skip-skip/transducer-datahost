@@ -1,14 +1,14 @@
-"""Panel scene workspace: left rail of right-opening cards plus the canvas.
+"""Panel scene workspace: full-height ribbon drawers plus the canvas.
 
 The shell owns one browser session's view of the shared scene state. Scenes are
 shared between every read token, while the selected scene, selected figure, and
 scene-card collapse state are stored per token label in ``state["ui"]``. The
 settings-card collapse state is session-only and never persisted.
 
-Both cards are ``pn.Card`` headers in the rail whose bodies open to the right
-over the canvas. Keeping the cards independent means either body can be open;
-an open body reserves its height in the rail so the next card header stays
-below it instead of overlapping.
+Both cards are ``pn.Card`` ribbons in a row on the left edge of the screen.
+Their vertical headers stay docked as 44px tabs while their bodies open to the
+right and span the full viewport height. The scenes ribbon is leftmost; opening
+it pushes the figure settings ribbon (and the canvas) to the right.
 """
 
 from __future__ import annotations
@@ -42,7 +42,7 @@ RAIL_TAB_WIDTH = 44
 DRAWER_WIDTH = 340
 
 SHELL_CSS = """
-.td-shell { background: #f5f6f8; min-height: 100vh; }
+.td-shell { background: #f5f6f8; }
 .td-header { background: #fff; border-bottom: 1px solid #d8dde6; padding: 0.65rem 1rem; }
 .td-rail { background: #fff; }
 .td-rail-card { border: 0; }
@@ -60,17 +60,27 @@ SHELL_CSS = """
 .td-scene-button { text-align: left; }
 """
 
+RAIL_CSS = """
+:host {
+  min-width: 0 !important;
+  max-width: none !important;
+  width: max-content !important;
+}
+"""
+
 DRAWER_CSS = f"""
 :host {{
   display: flex !important;
   flex-direction: row !important;
   align-items: stretch !important;
+  align-self: stretch !important;
+  flex: 0 0 auto !important;
   gap: 0 !important;
   overflow: visible !important;
   height: auto !important;
-  width: {RAIL_TAB_WIDTH}px !important;
+  width: auto !important;
   min-width: 0 !important;
-  max-width: {RAIL_TAB_WIDTH}px !important;
+  max-width: none !important;
   background: #fff;
   box-shadow: none !important;
   outline: none !important;
@@ -78,8 +88,9 @@ DRAWER_CSS = f"""
 .card-header {{
   flex: 0 0 {RAIL_TAB_WIDTH}px !important;
   width: {RAIL_TAB_WIDTH}px !important;
-  min-height: 140px !important;
+  min-height: 0 !important;
   height: auto !important;
+  align-self: stretch !important;
   margin-right: 0 !important;
   padding: 0.5rem 0 !important;
   position: static !important;
@@ -113,6 +124,8 @@ DRAWER_CSS = f"""
   max-width: calc(100vw - {RAIL_TAB_WIDTH}px) !important;
   min-width: 0 !important;
   height: auto !important;
+  align-self: stretch !important;
+  overflow-y: auto !important;
   background: #fff;
   border: 1px solid #d8dde6;
   border-left: 0;
@@ -181,7 +194,7 @@ class DashboardShell:
         self.tray_body: pn.Column | None = None
         self.settings_card: pn.Card | None = None
         self.settings_body: pn.Column | None = None
-        self.rail: pn.Column | None = None
+        self.rail: pn.Row | None = None
         self.canvas_body: Any = None
         self.settings_title: pn.widgets.TextInput | None = None
         self.settings_location: pn.widgets.Select | None = None
@@ -195,9 +208,16 @@ class DashboardShell:
         self._figure_delete_confirm_id: str | None = None
         self._locations_cache: list[dict[str, Any]] | None = None
         self._view = pn.Column(
-            sizing_mode="stretch_width",
+            sizing_mode="stretch_both",
             css_classes=["td-shell"],
             stylesheets=[SHELL_CSS],
+            styles={
+                "height": "100vh",
+                "min-height": "0",
+                "max-height": "100vh",
+                "overflow": "hidden",
+            },
+            margin=0,
         )
 
         self._load()
@@ -590,7 +610,8 @@ class DashboardShell:
             pn.Row(
                 self._render_rail(),
                 self._render_canvas(),
-                sizing_mode="stretch_width",
+                sizing_mode="stretch_both",
+                styles={"min-height": "0"},
             ),
         ]
 
@@ -613,17 +634,20 @@ class DashboardShell:
         self._refresh_status()
         return self.status_pane
 
-    def _render_rail(self) -> pn.Column:
-        self.rail = pn.Column(
+    def _render_rail(self) -> pn.Row:
+        self.rail = pn.Row(
             self._render_tray(),
             self._render_settings(),
-            width=RAIL_TAB_WIDTH,
             css_classes=["td-rail"],
+            stylesheets=[RAIL_CSS],
             margin=(0, 0, 0, 0),
             styles={
                 "position": "relative",
                 "z-index": "2",
                 "overflow": "visible",
+                "flex": "0 0 auto",
+                "width": "max-content",
+                "height": "100%",
             },
         )
         return self.rail
@@ -643,7 +667,6 @@ class DashboardShell:
             header_color="#1d2433",
             css_classes=["td-rail-card"],
             stylesheets=[DRAWER_CSS],
-            sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
         card.param.watch(self._on_tray_toggle, "collapsed")
@@ -676,8 +699,6 @@ class DashboardShell:
 
         self.scene_list = pn.Column(
             *items,
-            scroll=True,
-            max_height=360,
             sizing_mode="stretch_width",
         )
         return self.scene_list
@@ -770,9 +791,13 @@ class DashboardShell:
             self.scene_summary,
             self.canvas_body,
             css_classes=["td-canvas"],
-            sizing_mode="stretch_width",
-            min_height=420,
-            styles={"position": "relative", "z-index": "1"},
+            sizing_mode="stretch_both",
+            styles={
+                "position": "relative",
+                "z-index": "1",
+                "min-height": "0",
+                "overflow-y": "auto",
+            },
         )
 
     def _render_grid(self, scene: dict[str, Any]) -> pn.Column:
@@ -881,7 +906,6 @@ class DashboardShell:
             header_color="#1d2433",
             css_classes=["td-rail-card"],
             stylesheets=[DRAWER_CSS],
-            sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
         card.param.watch(self._on_settings_toggle, "collapsed")
