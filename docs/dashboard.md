@@ -59,15 +59,37 @@ chart or settings action shows an inline error; sign out and sign in again with
 a valid token. The session cookie itself is not revalidated on every request.
 
 The service sends `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-`Referrer-Policy: same-origin`, and a self-only Content-Security-Policy:
+`Referrer-Policy: same-origin`, and a self-only Content-Security-Policy. There are
+two policies. The Panel document at `/` and its `/static/` assets need
+`'unsafe-eval'` and `blob:`:
+
+```text
+default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:;
+style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;
+connect-src 'self' ws: wss:; worker-src 'self' blob:; frame-ancestors 'none';
+base-uri 'self'; form-action 'self'; object-src 'none'
+```
+
+`/login`, `/logout`, `/health`, and any route added later keep the strict policy,
+which omits `'unsafe-eval'` and `blob:` from `script-src`:
 
 ```text
 default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';
 img-src 'self' data:; font-src 'self' data:; connect-src 'self' ws: wss:;
-worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'
+worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';
+object-src 'none'
 ```
 
-No `unsafe-eval` is required.
+The relaxation is required by the UI itself, not by configuration: Panel's
+`GridStack` layout is a `ReactiveHTML` component whose scripts Panel compiles with
+`new Function`, and the bundled `es-module-shims` loads Bokeh's ES modules from
+`blob:` URLs. ADR-028 records the sign-off and the compensating controls.
+
+With devtools open the console still reports blocked requests for
+`cdn.jsdelivr.net/*.map`. Those are source-map fetches triggered by
+`//# sourceMappingURL=` comments inside the locally served `gridstack-all.js` and
+`es-module-shims.min.js`; no code is loaded from the CDN and rendering is
+unaffected. Do not add `cdn.jsdelivr.net` to `connect-src`.
 
 ## 3. State
 
@@ -303,8 +325,8 @@ Automated coverage in `dashboard/tests`:
 - State v2 validation, round-trip, backup, v1 and legacy-v2 archive,
   concurrent mutations.
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
-- FastAPI auth, health, security headers, Panel mount, self-hosted resources,
-  and the absence of external CDN URLs.
+- FastAPI auth, health, security headers, the per-route CSP, Panel mount,
+  self-hosted resources, and the absence of external CDN URLs.
 - Panel shell, grid, settings-tray callbacks, and chart builder/windowing.
 - Read-client and settings behavior.
 
@@ -324,8 +346,12 @@ Manual browser checklist:
 7. Delete a figure; the scene updates and the selection clears.
 8. Log in with a second token; the same scenes are visible.
 9. Confirm no `POSTGRES_*` variables in the dashboard container.
-10. Confirm no external network requests in the browser network log.
-11. Test backup and restore of the volume.
+10. Confirm no external network requests in the browser network log. The
+    `cdn.jsdelivr.net/*.map` messages that appear with devtools open are blocked
+    source-map fetches from local bundle comments, not code loads.
+11. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
+    `/login` still returns the strict CSP without `'unsafe-eval'`.
+12. Test backup and restore of the volume.
 
 ## 9. Boundaries
 

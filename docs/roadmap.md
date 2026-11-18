@@ -254,8 +254,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Two read tokens see the same scenes.
 - [x] The dashboard container has no `POSTGRES_*` environment variables, and no database
   schema, role, or read-API write route is added.
-- [ ] No external CDN requests; the page works under the final CSP. (Asset URLs and the
-  CSP header are automated; in-browser loading needs the browser checklist.)
+- [ ] No external CDN requests; the page works under the final CSP. (Asset URLs, the
+  per-route CSP header, and the `unsafe-eval`/`blob:` allowances are automated; the
+  in-browser load and grid interaction need the browser checklist.)
 - [x] `state.json` backup and restore tested, including the v1 archive.
 - [x] Python tests, ruff, and mypy pass.
 

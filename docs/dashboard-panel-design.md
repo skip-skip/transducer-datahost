@@ -81,8 +81,9 @@ The mount-stage placeholder confirmed the integration assumptions:
   CDN references.
 - `--root-path /dashboard` preserves the login redirect and cookie path, and the
   relative Panel asset URLs resolve under the prefix.
-- The page renders under a policy without `unsafe-eval`: inline scripts and
-  styles plus `ws:`/`wss:` connections are the required additions.
+- The mount-stage placeholder rendered under a policy without `unsafe-eval`. That
+  measurement did not survive contact with the real UI: the GridStack layout needs
+  `'unsafe-eval'` and `blob:` (see [Content Security Policy](#content-security-policy)).
 
 ## 3. Authentication and session flow
 
@@ -106,11 +107,11 @@ because the app refuses to load data without a session.
 
 ### Content Security Policy
 
-Panel and Bokeh require a wider policy than the previous `script-src 'self'`.
-The mount-stage policy is:
+Panel and Bokeh require a wider policy than the previous `script-src 'self'`. Two
+policies are served. The Panel document and its static assets get:
 
 - `default-src 'self'`
-- `script-src 'self' 'unsafe-inline'`
+- `script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:`
 - `style-src 'self' 'unsafe-inline'`
 - `img-src 'self' data:`
 - `font-src 'self' data:`
@@ -119,14 +120,35 @@ The mount-stage policy is:
 - `frame-ancestors 'none'`
 - `base-uri 'self'`
 - `form-action 'self'`
+- `object-src 'none'`
+
+`/login`, `/logout`, `/health`, and every route added later keep the strict policy,
+identical except that `script-src` is `'self' 'unsafe-inline'`. The middleware
+allowlists the relaxed policy by path (`/` and `/static/`), so a new route cannot
+inherit `'unsafe-eval'` by accident.
+
+`'unsafe-eval'` and `blob:` are not optional configuration. `pn.layout.GridStack` is
+a `ReactiveHTML` subclass, and Panel implements `ReactiveHTML` scripts by compiling
+them with `new Function`, which only `'unsafe-eval'` permits. Bokeh's `CustomJS`
+does the same. Bokeh 3 ships ES modules and Panel bundles `es-module-shims`, which
+executes them from `blob:` URLs, hence `blob:` in `script-src`.
+
+The mount-stage measurement claimed no `unsafe-eval` was needed; it was taken
+against a placeholder that never instantiated `ReactiveHTML`. The accepted policy is
+recorded in ADR-028 with the compensating controls: every HTML pane escapes
+untrusted text, `frame-ancestors 'none'`, `base-uri 'self'`, `object-src 'none'`,
+`nosniff`, and no external origins in any directive. Any future component that
+widens the policy further needs another ADR amendment.
 
 `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, and
-`Referrer-Policy: same-origin` stay. The page renders without `unsafe-eval`; if a
-future Panel component requires it, that is a security regression and must be
-called out in ADR-028 before it is accepted.
+`Referrer-Policy: same-origin` stay.
 
 Panel resources must be served by the dashboard itself. No CDN request is
-acceptable, and the browser network log is part of the verification checklist.
+acceptable, and the browser network log is part of the verification checklist. With
+devtools open, `cdn.jsdelivr.net/*.map` requests are reported as blocked; those are
+source-map fetches prompted by `//# sourceMappingURL=` comments inside the locally
+served bundles, not code loads. They are expected and must not be "fixed" by adding
+the CDN to `connect-src`.
 
 ## 4. State model (version 2)
 
@@ -425,8 +447,9 @@ Acceptance criteria:
 - **GridStack customization:** ribbon-only dragging and empty-cell clicks need a
   `ReactiveHTML` subclass and a JavaScript-to-Python bridge. This is the most
   custom UI work.
-- **CSP:** the minimum directives for Bokeh/Panel must be measured, and any
-  `unsafe-eval` requirement needs explicit sign-off.
+- **CSP:** resolved. The GridStack `ReactiveHTML` layout and the ESM shim require
+  `'unsafe-eval'` and `blob:` in `script-src`; the strict policy is kept on the
+  non-Panel routes. See ADR-028 for the sign-off and compensating controls.
 - **Self-hosted resources:** Panel must not fall back to a CDN.
 - **Concurrency:** last-write-wins is acceptable for the MVP but should be
   revisited if multiple analysts edit the same scene frequently.

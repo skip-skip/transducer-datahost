@@ -23,9 +23,9 @@ from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings, SettingsError
 from .state import StateStore
 
-CSP = (
+_CSP_TEMPLATE = (
     "default-src 'self'; "
-    "script-src 'self' 'unsafe-inline'; "
+    "script-src {script_src}; "
     "style-src 'self' 'unsafe-inline'; "
     "img-src 'self' data:; "
     "font-src 'self' data:; "
@@ -33,8 +33,32 @@ CSP = (
     "worker-src 'self' blob:; "
     "frame-ancestors 'none'; "
     "base-uri 'self'; "
-    "form-action 'self'"
+    "form-action 'self'; "
+    "object-src 'none'"
 )
+
+CSP_STRICT = _CSP_TEMPLATE.format(script_src="'self' 'unsafe-inline'")
+
+# Panel's GridStack layout is a ReactiveHTML component: Panel compiles its
+# scripts with ``new Function``, which CSP only permits under 'unsafe-eval'.
+# The bundled es-module-shims executes Bokeh's ES modules from blob URLs, which
+# needs ``blob:`` in script-src. ADR-028 records the sign-off and mitigations.
+CSP_PANEL = _CSP_TEMPLATE.format(
+    script_src="'self' 'unsafe-inline' 'unsafe-eval' blob:"
+)
+
+
+def _csp_for(request: Request) -> str:
+    """Return the policy for the response to ``request``.
+
+    The Panel document and its static assets get the relaxed policy; every
+    other route keeps the strict one, so a route added later cannot inherit
+    ``'unsafe-eval'`` by accident.
+    """
+    path = request.scope.get("path", "/")
+    if path == "/" or path.startswith("/static/"):
+        return CSP_PANEL
+    return CSP_STRICT
 
 
 def _login_page(error: str | None) -> str:
@@ -123,7 +147,7 @@ def create_app(
         response.headers.setdefault("X-Frame-Options", "DENY")
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "same-origin")
-        response.headers.setdefault("Content-Security-Policy", CSP)
+        response.headers.setdefault("Content-Security-Policy", _csp_for(request))
         return response
 
     # -- authentication ----------------------------------------------------

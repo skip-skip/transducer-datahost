@@ -148,6 +148,20 @@ def test_panel_serves_its_own_static_assets(client: TestClient) -> None:
         assert response.status_code == 200, path
         assert response.headers["content-type"].startswith("application/javascript")
         assert response.content
+        # Static assets share the Panel policy; the strict policy starts at
+        # the routes that are not part of the mounted application.
+        script_src = _directive(
+            response.headers["Content-Security-Policy"], "script-src"
+        )
+        assert "'unsafe-eval'" in script_src
+
+
+def _directive(csp: str, name: str) -> str:
+    for directive in csp.split(";"):
+        directive = directive.strip()
+        if directive.startswith(f"{name} "):
+            return directive[len(name) + 1 :]
+    raise AssertionError(f"{name} missing from {csp}")
 
 
 def test_security_headers_wrap_panel_responses(client: TestClient) -> None:
@@ -157,11 +171,32 @@ def test_security_headers_wrap_panel_responses(client: TestClient) -> None:
     assert response.headers["X-Content-Type-Options"] == "nosniff"
     assert response.headers["Referrer-Policy"] == "same-origin"
     csp = response.headers["Content-Security-Policy"]
-    assert "script-src 'self' 'unsafe-inline'" in csp
-    assert "style-src 'self' 'unsafe-inline'" in csp
-    assert "connect-src 'self' ws: wss:" in csp
-    assert "frame-ancestors 'none'" in csp
-    assert "unsafe-eval" not in csp
+    script_src = _directive(csp, "script-src")
+    assert "'self'" in script_src
+    assert "'unsafe-inline'" in script_src
+    assert "'unsafe-eval'" in script_src
+    assert "blob:" in script_src
+    assert _directive(csp, "style-src") == "'self' 'unsafe-inline'"
+    assert _directive(csp, "connect-src") == "'self' ws: wss:"
+    assert _directive(csp, "worker-src") == "'self' blob:"
+    assert _directive(csp, "frame-ancestors") == "'none'"
+    assert _directive(csp, "object-src") == "'none'"
+
+
+@pytest.mark.parametrize(
+    ("method", "path"),
+    [("GET", "/login"), ("POST", "/logout"), ("GET", "/health")],
+)
+def test_strict_csp_covers_the_non_panel_routes(
+    client: TestClient, method: str, path: str
+) -> None:
+    response = client.request(method, path, follow_redirects=False)
+
+    script_src = _directive(response.headers["Content-Security-Policy"], "script-src")
+    assert "'self'" in script_src
+    assert "'unsafe-inline'" in script_src
+    assert "'unsafe-eval'" not in script_src
+    assert "blob:" not in script_src
 
 
 def test_root_path_is_preserved_for_login_and_panel(tmp_path) -> None:
@@ -169,9 +204,15 @@ def test_root_path_is_preserved_for_login_and_panel(tmp_path) -> None:
         page = test_client.get("/")
         assert page.status_code == 200
         assert "<title>Transducer dashboard</title>" in page.text
+        assert "'unsafe-eval'" in _directive(
+            page.headers["Content-Security-Policy"], "script-src"
+        )
 
         login_page = test_client.get("/login")
         assert login_page.status_code == 200
+        assert "'unsafe-eval'" not in _directive(
+            login_page.headers["Content-Security-Policy"], "script-src"
+        )
 
         response = login(test_client)
         assert response.status_code == 303

@@ -654,9 +654,17 @@ The detailed component, state, interaction, and test design is in
   second service or port is added.
 - The dashboard gains a Bokeh/Panel runtime and a dependency upgrade. Panel resources
   must be served locally, not from a CDN.
-- The Content Security Policy must be widened for Bokeh/Panel inline scripts, styles, and
-  websocket connections. The final directives are measured during the mount spike; an
-  `unsafe-eval` requirement would need separate sign-off.
+- The Content Security Policy is widened for Bokeh/Panel inline scripts, styles, and
+  websocket connections. The measured policy needs `'unsafe-eval'` and `blob:` in
+  `script-src`, which the mount spike did not predict: `pn.layout.GridStack` is a
+  `ReactiveHTML` component whose scripts Panel compiles with `new Function`, and the
+  bundled `es-module-shims` executes Bokeh's ES modules from `blob:` URLs. This ADR
+  records that sign-off. The relaxation is scoped to the Panel document and
+  `/static/`; `/login`, `/logout`, `/health`, and any route added later keep
+  `script-src 'self' 'unsafe-inline'`. Compensating controls: every HTML pane escapes
+  untrusted text, and `frame-ancestors 'none'`, `base-uri 'self'`, `object-src 'none'`,
+  `nosniff`, and self-only origins remain in force. Any further widening needs a new
+  amendment to this ADR.
 - The existing JSON state, atomic-write, backup, and authentication behavior is retained.
   A process-wide lock is added because Panel callbacks may run on multiple threads.
 - Concurrent scene edits are last-write-wins.

@@ -103,7 +103,9 @@ Rules:
   - `DASHBOARD_SECRET_KEY` signs the cookie; rotating it invalidates sessions. The
     cookie is signed, not encrypted, so it must remain `HttpOnly` and TLS-only.
   - The dashboard sets `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`,
-    `Referrer-Policy: same-origin`, and a self-only CSP.
+    `Referrer-Policy: same-origin`, and a self-only CSP. The Panel document needs
+    `'unsafe-eval'` and `blob:` in `script-src` for `ReactiveHTML` and the ES-module
+    shim; login, logout, and health keep the strict policy. See ADR-028.
 - `/health` is unauthenticated so Compose and the proxy can probe liveness. It exposes no
   data.
 
