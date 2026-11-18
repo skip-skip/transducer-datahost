@@ -145,8 +145,9 @@ Rules:
   prompt instead of a chart.
 - `range` is one of `24h`, `7d`, `30d`. New figures start at the range implied
   by `DASHBOARD_DEFAULT_WINDOW_DAYS`.
-- The selected scene, selected figure, and scene-tray collapse state are stored
-  per token label under `ui`.
+- The selected scene, selected figure, and scenes-card collapse state are stored
+  per token label under `ui`. The settings-card collapse state is session-only
+  and is not persisted.
 - Figure and scene IDs are UUIDs because there is no database identity column.
 
 A version 1 state file (personal/shared figures) is archived to
@@ -171,24 +172,17 @@ Write safety:
 
 ## 4. UI
 
-Scene tray (left, collapsible):
+Left rail (two independent collapsible cards):
+
+Scenes card:
 
 - Lists every shared scene; the selected scene is highlighted.
 - `+ New scene` creates and selects a scene.
 - `Delete scene` takes two clicks (delete, then confirm) and removes its
   figures.
+- Its collapse state persists per token label.
 
-Scene canvas (center):
-
-- A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
-- Clicking an empty cell creates a minimum-size figure at that cell. If the cell
-  cannot fit one, the first free slot is used; a full scene reports instead of
-  overlapping figures.
-- Each figure has a title ribbon and a chart. Click the ribbon to select and
-  highlight the figure; drag the ribbon to move it; drag the lower-right corner
-  to resize. Layouts persist immediately and survive reloads and restarts.
-
-Settings tray (right):
+Figure settings card:
 
 - `Title`, `Location` (including "All locations"), `Analyte`, and a
   `24h`/`7d`/`30d` range.
@@ -199,6 +193,18 @@ Settings tray (right):
 - `Save` rejects a blank title, a missing analyte, a series that does not exist,
   and a location/series pair with no readings together.
 - `Delete figure` takes two clicks (delete, then confirm).
+- Its collapse state is per browser session and resets on reload. Selecting a
+  figure (or creating one) expands the card.
+
+Scene canvas (right of the rail):
+
+- A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
+- Clicking an empty cell creates a minimum-size figure at that cell. If the cell
+  cannot fit one, the first free slot is used; a full scene reports instead of
+  overlapping figures.
+- Each figure has a title ribbon and a chart. Click the ribbon to select and
+  highlight the figure; drag the ribbon to move it; drag the lower-right corner
+  to resize. Layouts persist immediately and survive reloads and restarts.
 
 Charts:
 
@@ -329,10 +335,10 @@ Automated coverage in `dashboard/tests`:
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, the per-route CSP, Panel mount,
   self-hosted resources, and the absence of external CDN URLs.
-- Panel shell, grid, settings-tray callbacks, and chart builder/windowing.
+- Panel shell, grid, settings-card callbacks, and chart builder/windowing.
 - Read-client and settings behavior.
 
-Latest local run: `161 passed`; `ruff check dashboard` and
+Latest local run: `177 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
 grid layout persistence, the empty-cell bridge, settings save/reload, and
 Bokeh chart rendering into a document.
@@ -342,18 +348,20 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings tray opens.
-5. Drag and resize a figure; the layout survives a reload and a restart.
-6. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
-7. Delete a figure; the scene updates and the selection clears.
-8. Log in with a second token; the same scenes are visible.
-9. Confirm no `POSTGRES_*` variables in the dashboard container.
-10. Confirm no external network requests in the browser network log. The
+4. Click a ribbon; the figure highlights and the settings card expands.
+5. Collapse each card independently. The scenes card stays collapsed after a
+   reload; the settings card resets to open.
+6. Drag and resize a figure; the layout survives a reload and a restart.
+7. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
+8. Delete a figure; the scene updates and the selection clears.
+9. Log in with a second token; the same scenes are visible.
+10. Confirm no `POSTGRES_*` variables in the dashboard container.
+11. Confirm no external network requests in the browser network log. The
     `cdn.jsdelivr.net/*.map` messages that appear with devtools open are blocked
     source-map fetches from local bundle comments, not code loads.
-11. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
+12. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
     `/login` still returns the strict CSP without `'unsafe-eval'`.
-12. Test backup and restore of the volume.
+13. Test backup and restore of the volume.
 
 ## 9. Boundaries
 

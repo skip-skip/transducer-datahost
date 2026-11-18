@@ -115,7 +115,9 @@ def test_empty_state_shows_the_create_prompt(tmp_path) -> None:
     assert "Create a scene" in shell.canvas_body.object
     assert "Select a figure" in shell.settings_body.objects[0].object
     assert shell.delete_scene_button.disabled is True
-    assert shell.tray_body.visible is True
+    assert shell.tray_card.collapsed is False
+    assert shell.settings_card.collapsed is False
+    assert shell.rail.objects == [shell.tray_card, shell.settings_card]
 
 
 def test_create_scene_selects_and_persists_it(tmp_path) -> None:
@@ -212,12 +214,35 @@ def test_tray_collapse_persists(tmp_path) -> None:
 
     shell.toggle_scenes_tray()
 
-    assert shell.tray_body.visible is False
+    assert shell.tray_card.collapsed is True
     assert shell.tray_collapsed is True
     assert store.load()["ui"]["alice"]["scenes_tray_collapsed"] is True
 
     reloaded, _ = make_shell(tmp_path)
-    assert reloaded.tray_body.visible is False
+    assert reloaded.tray_card.collapsed is True
+
+
+def test_tray_collapse_survives_a_rebuild(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.toggle_scenes_tray()
+
+    shell.create_scene()
+
+    assert shell.tray_card.collapsed is True
+
+
+def test_settings_collapse_is_ephemeral(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+
+    shell.settings_card.collapsed = True
+    shell.create_scene()
+
+    assert shell.settings_card.collapsed is True
+
+    reloaded, _ = make_shell(tmp_path)
+    assert reloaded.settings_card.collapsed is False
 
 
 def test_delete_scene_requires_confirmation(tmp_path) -> None:
@@ -323,13 +348,15 @@ def test_delete_and_cancel_buttons_are_wired(tmp_path) -> None:
 
 
 def test_tray_toggle_is_wired(tmp_path) -> None:
-    shell, _ = make_shell(tmp_path)
+    shell, store = make_shell(tmp_path)
 
-    shell.tray_toggle.clicks += 1
+    shell.tray_card.collapsed = True
     assert shell.tray_collapsed is True
+    assert store.load()["ui"]["alice"]["scenes_tray_collapsed"] is True
 
-    shell.tray_toggle.clicks += 1
+    shell.tray_card.collapsed = False
     assert shell.tray_collapsed is False
+    assert store.load()["ui"]["alice"]["scenes_tray_collapsed"] is False
 
 
 def test_scene_names_are_escaped_in_the_canvas(tmp_path) -> None:
@@ -470,7 +497,7 @@ def test_a_full_scene_reports_instead_of_overlapping(tmp_path, monkeypatch) -> N
     assert len(shell.figure_cards) == 1
 
 
-def test_the_ribbon_selects_the_figure_and_updates_the_settings_tray(tmp_path) -> None:
+def test_the_ribbon_selects_the_figure_and_updates_the_settings_card(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
     first = shell.create_figure(0, 0)
@@ -485,6 +512,31 @@ def test_the_ribbon_selects_the_figure_and_updates_the_settings_tray(tmp_path) -
     assert "figure-selected" in shell.figure_cards[first["id"]].css_classes
     assert "figure-selected" not in shell.figure_cards[second["id"]].css_classes
     assert first["title"] in shell.settings_title.value
+
+
+def test_selecting_a_figure_expands_the_settings_card(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    shell.settings_card.collapsed = True
+
+    shell.figure_cards[first["id"]].ribbon.clicks += 1
+
+    assert shell.selected_figure_id == first["id"]
+    assert shell.settings_card.collapsed is False
+
+
+def test_creating_a_figure_expands_the_settings_card(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.settings_card.collapsed = True
+
+    shell.create_figure(0, 0)
+
+    assert shell.settings_card.collapsed is False
 
 
 def test_figure_selection_persists_per_user(tmp_path) -> None:
@@ -614,7 +666,7 @@ def option_values(select) -> list:
     return [value for _, value in select.options]
 
 
-def test_the_settings_tray_shows_the_selected_figure(tmp_path) -> None:
+def test_the_settings_card_shows_the_selected_figure(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
     figure = shell.create_figure(0, 0)
@@ -756,7 +808,7 @@ def test_deleting_a_figure_requires_confirmation(tmp_path) -> None:
     assert "Select a figure" in shell.settings_body.objects[0].object
 
 
-def test_a_failed_location_load_is_reported_in_the_tray(
+def test_a_failed_location_load_is_reported_in_the_settings_card(
     tmp_path, monkeypatch
 ) -> None:
     shell, _ = make_shell(tmp_path)

@@ -1,8 +1,9 @@
-"""Panel scene workspace: scene tray, canvas frame, and settings tray.
+"""Panel scene workspace: left rail of collapsible cards plus the canvas.
 
 The shell owns one browser session's view of the shared scene state. Scenes are
 shared between every read token, while the selected scene, selected figure, and
-scene-tray collapse state are stored per token label in ``state["ui"]``.
+scene-card collapse state are stored per token label in ``state["ui"]``. The
+settings-card collapse state is session-only and never persisted.
 """
 
 from __future__ import annotations
@@ -35,9 +36,9 @@ from .state import (
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; min-height: 100vh; }
 .td-header { background: #fff; border-bottom: 1px solid #d8dde6; padding: 0.65rem 1rem; }
-.td-tray { background: #fff; border-right: 1px solid #d8dde6; padding: 0.75rem; }
+.td-rail { background: #fff; border-right: 1px solid #d8dde6; }
+.td-rail-card { border: 0; border-bottom: 1px solid #d8dde6; }
 .td-canvas { background: #fff; padding: 1rem 1.25rem; }
-.td-settings { background: #fff; border-left: 1px solid #d8dde6; padding: 0.75rem; }
 .td-muted { color: #5b6472; }
 .td-empty {
   border: 1px dashed #b8c0cc;
@@ -50,6 +51,8 @@ SHELL_CSS = """
 .td-status-error { color: #a11616; }
 .td-scene-button { text-align: left; }
 """
+
+RAIL_WIDTH = 280
 
 
 class DashboardShell:
@@ -71,6 +74,7 @@ class DashboardShell:
         self._selected_scene_id: str | None = None
         self._selected_figure_id: str | None = None
         self._tray_collapsed = False
+        self._settings_collapsed = False
         self._delete_confirm = False
         self._status = ""
         self._status_is_error = False
@@ -82,7 +86,11 @@ class DashboardShell:
         self._grid: SceneGrid | None = None
         self._figure_cards: dict[str, FigureCard] = {}
         self._grid_figure_ids: dict[str, str] = {}
+        self.tray_card: pn.Card | None = None
+        self.tray_body: pn.Column | None = None
+        self.settings_card: pn.Card | None = None
         self.settings_body: pn.Column | None = None
+        self.rail: pn.Column | None = None
         self.canvas_body: Any = None
         self.settings_title: pn.widgets.TextInput | None = None
         self.settings_location: pn.widgets.Select | None = None
@@ -294,9 +302,25 @@ class DashboardShell:
         self.refresh()
 
     def toggle_scenes_tray(self, event: Any = None) -> None:
-        self._tray_collapsed = not self._tray_collapsed
+        card = self.tray_card
+        if card is None:
+            self._tray_collapsed = not self._tray_collapsed
+            self._save_ui()
+            return
+        card.collapsed = not card.collapsed
+
+    def _on_tray_toggle(self, event: Any) -> None:
+        self._tray_collapsed = bool(event.new)
         self._save_ui()
-        self.refresh()
+
+    def _set_settings_collapsed(self, collapsed: bool) -> None:
+        self._settings_collapsed = collapsed
+        card = self.settings_card
+        if card is not None and card.collapsed != collapsed:
+            card.collapsed = collapsed
+
+    def _on_settings_toggle(self, event: Any) -> None:
+        self._settings_collapsed = bool(event.new)
 
     # -- figure actions ----------------------------------------------------
 
@@ -358,6 +382,7 @@ class DashboardShell:
 
         self._selected_figure_id = figure["id"]
         self._delete_confirm = False
+        self._settings_collapsed = False
         self._clear_status()
         self.refresh()
         return figure
@@ -415,6 +440,8 @@ class DashboardShell:
     def _update_selection(self) -> None:
         for figure_id, card in self._figure_cards.items():
             card.set_selected(figure_id == self._selected_figure_id)
+        if self._selected_figure_id is not None:
+            self._set_settings_collapsed(False)
         if self.settings_body is not None:
             self._fill_settings()
 
@@ -461,13 +488,17 @@ class DashboardShell:
         self._grid = None
         self._figure_cards = {}
         self._grid_figure_ids = {}
+        self.tray_card = None
+        self.tray_body = None
+        self.settings_card = None
+        self.settings_body = None
+        self.rail = None
         self._view.objects = [
             self._render_header(),
             self._render_status(),
             pn.Row(
-                self._render_tray(),
+                self._render_rail(),
                 self._render_canvas(),
-                self._render_settings(),
                 sizing_mode="stretch_width",
             ),
         ]
@@ -491,41 +522,35 @@ class DashboardShell:
         self._refresh_status()
         return self.status_pane
 
-    def _render_tray(self) -> pn.Column:
-        collapsed = self._tray_collapsed
-        toggle = pn.widgets.Button(
-            label="▶" if collapsed else "◀",
-            color="light",
-            width=38,
+    def _render_rail(self) -> pn.Column:
+        self.rail = pn.Column(
+            self._render_tray(),
+            self._render_settings(),
+            width=RAIL_WIDTH,
+            css_classes=["td-rail"],
             margin=(0, 0, 0, 0),
         )
-        toggle.on_click(self.toggle_scenes_tray)
-        self.tray_toggle = toggle
+        return self.rail
 
-        header = pn.Row(
-            pn.pane.HTML(
-                "<strong>Scenes</strong>",
-                visible=not collapsed,
-                margin=(0, 0, 0, 0),
-            ),
-            toggle,
-            sizing_mode="stretch_width",
-            styles={"align-items": "center"},
-        )
-
+    def _render_tray(self) -> pn.Card:
         self.tray_body = pn.Column(
             self._render_scene_list(),
             self._render_scene_actions(),
             sizing_mode="stretch_width",
-            visible=not collapsed,
         )
-
-        return pn.Column(
-            header,
+        card = pn.Card(
             self.tray_body,
-            css_classes=["td-tray"],
-            width=44 if collapsed else 240,
+            title="Scenes",
+            collapsed=self._tray_collapsed,
+            header_background="#fff",
+            header_color="#1d2433",
+            css_classes=["td-rail-card"],
+            sizing_mode="stretch_width",
+            margin=(0, 0, 0, 0),
         )
+        card.param.watch(self._on_tray_toggle, "collapsed")
+        self.tray_card = card
+        return card
 
     def _render_scene_list(self) -> pn.Column:
         self._scene_buttons = {}
@@ -743,16 +768,22 @@ class DashboardShell:
             return chart_placeholder("No data available for this range.")
         return pn.pane.Bokeh(plot, sizing_mode="stretch_both")
 
-    def _render_settings(self) -> pn.Column:
+    def _render_settings(self) -> pn.Card:
         self.settings_body = pn.Column(sizing_mode="stretch_width")
         self._fill_settings()
-        return pn.Column(
-            pn.pane.HTML("<strong>Figure settings</strong>"),
+        card = pn.Card(
             self.settings_body,
-            css_classes=["td-settings"],
-            width=300,
-            min_height=420,
+            title="Figure settings",
+            collapsed=self._settings_collapsed,
+            header_background="#fff",
+            header_color="#1d2433",
+            css_classes=["td-rail-card"],
+            sizing_mode="stretch_width",
+            margin=(0, 0, 0, 0),
         )
+        card.param.watch(self._on_settings_toggle, "collapsed")
+        self.settings_card = card
+        return card
 
     def _fill_settings(self) -> None:
         if self.settings_body is None:

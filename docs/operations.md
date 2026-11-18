@@ -322,7 +322,7 @@ There is no separate site/logger registration step. The loader upserts
    ```
 
 3. Refresh the dashboard; new locations and analytes appear in the settings
-   tray for figures in a shared scene.
+   card for figures in a shared scene.
 
 If the filename and header location disagree, the import succeeds with a
 warning and the header location wins. Review the `import_file.error` text.

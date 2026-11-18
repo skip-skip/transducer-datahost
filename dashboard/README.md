@@ -16,17 +16,18 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
   list of figures.
 - Each figure binds to an optional `location_id` and `series_id`, a range
   (`24h`, `7d`, `30d`), and a grid layout (`x`, `y`, `w`, `h`).
-- `ui[<token label>]`: the selected scene, selected figure, and scene-tray
-  collapse state for each user.
+- `ui[<token label>]`: the selected scene, selected figure, and scenes-card
+  collapse state for each user. The settings-card collapse state is per session
+  and is not stored.
 
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
 
 In the browser, click an empty grid cell to add a figure, click its title ribbon
-to select it and open the settings tray, and drag the ribbon to move it. Layout
+to select it and expand the settings card, and drag the ribbon to move it. Layout
 changes are saved immediately to the shared state.
 
-The settings tray edits the title, location, analyte, and range (`24h`, `7d`,
+The settings card edits the title, location, analyte, and range (`24h`, `7d`,
 `30d`). Saving verifies the analyte against the read API: an unknown series is
 rejected, and a series with no readings at the chosen location is rejected.
 Deleting a figure takes two clicks (delete, then confirm).

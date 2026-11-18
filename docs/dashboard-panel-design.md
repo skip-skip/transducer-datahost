@@ -11,14 +11,15 @@ once the implementation lands.
 The dashboard becomes a Python-only Panel application mounted inside the existing
 FastAPI service. The MVP deliberately stays small:
 
-- A collapsible left tray lists **scenes**.
+- A left rail holds two collapsible cards: **scenes** and the selected figure's
+  **settings**.
 - A scene is a named collection of figures placed in a gridded canvas.
 - Scenes can be created and deleted.
 - **All scenes are shared between all users.** There are no personal scenes.
 - Clicking an empty grid cell creates a new figure at the minimum size.
 - A figure has a title ribbon. Clicking the ribbon selects the figure; dragging
   the ribbon moves it within the grid.
-- Selecting a figure highlights it and opens its settings in a right-hand tray.
+- Selecting a figure highlights it and expands the settings card in the rail.
 - Only time-series figures are implemented.
 
 Non-goals for this MVP:
@@ -247,7 +248,7 @@ The domain layer is plain Python and is testable without Panel.
   - Accepts a batch keyed by figure ID.
   - Validates bounds and minimum size.
 - `set_ui(state, label, **changes) -> None`
-  - Stores selection and tray state per user.
+  - Stores selection and scenes-card state per user.
 
 Any valid read token may create or delete scenes and edit figures. There is no
 personal/shared split and no editor allowlist in the MVP.
@@ -256,30 +257,32 @@ personal/shared split and no editor allowlist in the MVP.
 
 ```text
 Shell (custom pn.Row / pn.Column with self-hosted CSS)
-├── Left scene tray (collapsible)
-│   ├── "Scenes" header + collapse toggle
-│   ├── Scene list (selected scene highlighted)
-│   ├── + New scene
-│   └── Delete scene (with confirm step)
-├── Center scene canvas
-│   ├── Scene title + figure count
-│   └── SceneGrid (Panel GridStack subclass)
-│       └── FigureCard
-│           ├── FigureRibbon (Button; drag handle; click to select)
-│           └── ChartPane (Bokeh figure or placeholder)
-└── Right settings tray
-    ├── Empty state: "Select a figure"
-    └── Selected figure
-        ├── Title
-        ├── Location select ("All locations" plus known locations)
-        ├── Analyte select (series for the chosen location)
-        ├── Range: 24h / 7d / 30d
-        ├── Save
-        └── Delete figure
+├── Left rail (fixed width, two independent cards)
+│   ├── Scenes card (collapsible; collapse persists per token label)
+│   │   ├── Scene list (selected scene highlighted)
+│   │   ├── + New scene
+│   │   └── Delete scene (with confirm step)
+│   └── Figure settings card (collapsible; collapse is per session)
+│       ├── Empty state: "Select a figure"
+│       └── Selected figure
+│           ├── Title
+│           ├── Location select ("All locations" plus known locations)
+│           ├── Analyte select (series for the chosen location)
+│           ├── Range: 24h / 7d / 30d
+│           ├── Save
+│           └── Delete figure
+└── Center scene canvas
+    ├── Scene title + figure count
+    └── SceneGrid (Panel GridStack subclass)
+        └── FigureCard
+            ├── FigureRibbon (Button; drag handle; click to select)
+            └── ChartPane (Bokeh figure or placeholder)
 ```
 
 A custom shell is preferred over a Panel template for the MVP because it keeps
-the right-hand settings tray simple and avoids template resource dependencies.
+the rail simple and avoids template resource dependencies. Two independent
+`pn.Card`s are used instead of one `pn.Accordion` so the scenes and settings
+collapse states stay independent; selecting a figure expands the settings card.
 
 ## 7. Grid interaction specification
 
@@ -311,7 +314,7 @@ the right-hand settings tray simple and avoids template resource dependencies.
 - A drag stop sets a short-lived flag so the click handler does not also select
   the figure after a move.
 - A real click selects the figure, updates the highlight, and populates the
-  settings tray.
+  settings card.
 
 ### Selection highlight
 
@@ -393,7 +396,7 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings tray opens.
+4. Click a ribbon; the figure highlights and the settings card expands.
 5. Drag a ribbon; the figure moves and the layout survives a reload and a
    container restart.
 6. Resize a figure; the minimum size is enforced and the layout persists.
@@ -415,7 +418,8 @@ asset.
    local resources.
 3. **State v2 and domain:** schema, validation, v1 archive, scene/figure CRUD,
    layout, tests.
-4. **Scene shell:** collapsible scene tray, settings tray, scene create/delete.
+4. **Scene shell:** collapsible scenes card and settings card in one left rail,
+   scene create/delete.
 5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
    selection, layout persistence.
 6. **Figure settings and charts:** title/location/analyte/range/delete, Bokeh
