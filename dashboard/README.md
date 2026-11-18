@@ -24,8 +24,14 @@ Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
 
 In the browser, click an empty grid cell to add a figure, click its title ribbon
-to select it and expand the settings card, and drag the ribbon to move it. Layout
+to select it and open the settings card, and drag the ribbon to move it. Layout
 changes are saved immediately to the shared state.
+
+The two rail cards (scenes and figure settings) open to the right over the
+canvas rather than downward. Headers stay in the 280 px rail and bodies appear as
+340 px flyouts; open bodies stay in flow, so they push the next card header down
+instead of overlapping. The rail paints above the canvas so flyouts cover the
+charts underneath.
 
 The settings card edits the title, location, analyte, and range (`24h`, `7d`,
 `30d`). Saving verifies the analyte against the read API: an unknown series is

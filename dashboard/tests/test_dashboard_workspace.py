@@ -9,7 +9,7 @@ from transducer_dashboard.auth import Session
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
 from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
-from transducer_dashboard.workspace import DashboardShell
+from transducer_dashboard.workspace import FLYOUT_CSS, DashboardShell
 
 LOCATIONS = [
     {"location_id": 1, "name": "MCMW-04"},
@@ -118,6 +118,24 @@ def test_empty_state_shows_the_create_prompt(tmp_path) -> None:
     assert shell.tray_card.collapsed is False
     assert shell.settings_card.collapsed is False
     assert shell.rail.objects == [shell.tray_card, shell.settings_card]
+
+
+def test_rail_cards_open_to_the_right(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    for card, body in (
+        (shell.tray_card, shell.tray_body),
+        (shell.settings_card, shell.settings_body),
+    ):
+        assert card is not None
+        assert body is not None
+        assert body.css_classes == ["td-card-body"]
+        assert card.css_classes == ["td-rail-card"]
+        assert card.stylesheets == [FLYOUT_CSS]
+
+    assert "flex-direction: row" in FLYOUT_CSS
+    assert shell.rail is not None
+    assert shell.rail.styles == {"position": "relative", "z-index": "2"}
 
 
 def test_create_scene_selects_and_persists_it(tmp_path) -> None:

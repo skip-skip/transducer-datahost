@@ -172,7 +172,13 @@ Write safety:
 
 ## 4. UI
 
-Left rail (two independent collapsible cards):
+Left rail (two independent cards whose bodies open to the right over the canvas):
+
+The rail stays 280 px wide. Each card header sits in the rail; opening a card
+reveals its body as a 340 px flyout to the right. Bodies stay in flow, so an open
+body reserves its height in the rail and pushes the next card header down rather
+than overlapping it. Both cards can be open at once. The rail paints above the
+canvas so a flyout covers the charts underneath.
 
 Scenes card:
 

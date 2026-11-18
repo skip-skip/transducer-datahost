@@ -1,9 +1,14 @@
-"""Panel scene workspace: left rail of collapsible cards plus the canvas.
+"""Panel scene workspace: left rail of right-opening cards plus the canvas.
 
 The shell owns one browser session's view of the shared scene state. Scenes are
 shared between every read token, while the selected scene, selected figure, and
 scene-card collapse state are stored per token label in ``state["ui"]``. The
 settings-card collapse state is session-only and never persisted.
+
+Both cards are ``pn.Card`` headers in the rail whose bodies open to the right
+over the canvas. Keeping the cards independent means either body can be open;
+an open body reserves its height in the rail so the next card header stays
+below it instead of overlapping.
 """
 
 from __future__ import annotations
@@ -33,11 +38,13 @@ from .state import (
     StateStore,
 )
 
+RAIL_WIDTH = 280
+
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; min-height: 100vh; }
 .td-header { background: #fff; border-bottom: 1px solid #d8dde6; padding: 0.65rem 1rem; }
 .td-rail { background: #fff; border-right: 1px solid #d8dde6; }
-.td-rail-card { border: 0; border-bottom: 1px solid #d8dde6; }
+.td-rail-card { border: 0; }
 .td-canvas { background: #fff; padding: 1rem 1.25rem; }
 .td-muted { color: #5b6472; }
 .td-empty {
@@ -52,7 +59,41 @@ SHELL_CSS = """
 .td-scene-button { text-align: left; }
 """
 
-RAIL_WIDTH = 280
+FLYOUT_CSS = f"""
+:host {{
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: flex-start;
+  gap: 0 !important;
+  overflow: visible !important;
+  height: auto !important;
+  width: {RAIL_WIDTH}px !important;
+  min-width: 0 !important;
+  max-width: {RAIL_WIDTH}px !important;
+  background: #fff;
+  box-shadow: none !important;
+  outline: none !important;
+}}
+.card-header {{
+  flex: 0 0 {RAIL_WIDTH}px !important;
+  width: {RAIL_WIDTH}px !important;
+  margin-right: 0 !important;
+  position: static !important;
+  border-bottom: 1px solid #d8dde6;
+}}
+.td-card-body {{
+  flex: 0 0 340px !important;
+  width: 340px !important;
+  max-width: calc(100vw - {RAIL_WIDTH}px) !important;
+  min-width: 0 !important;
+  height: auto !important;
+  background: #fff;
+  border: 1px solid #d8dde6;
+  border-left: 0;
+  padding: 0.75rem;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}}
+"""
 
 
 class DashboardShell:
@@ -529,6 +570,7 @@ class DashboardShell:
             width=RAIL_WIDTH,
             css_classes=["td-rail"],
             margin=(0, 0, 0, 0),
+            styles={"position": "relative", "z-index": "2"},
         )
         return self.rail
 
@@ -537,6 +579,7 @@ class DashboardShell:
             self._render_scene_list(),
             self._render_scene_actions(),
             sizing_mode="stretch_width",
+            css_classes=["td-card-body"],
         )
         card = pn.Card(
             self.tray_body,
@@ -545,6 +588,7 @@ class DashboardShell:
             header_background="#fff",
             header_color="#1d2433",
             css_classes=["td-rail-card"],
+            stylesheets=[FLYOUT_CSS],
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
@@ -674,6 +718,7 @@ class DashboardShell:
             css_classes=["td-canvas"],
             sizing_mode="stretch_width",
             min_height=420,
+            styles={"position": "relative", "z-index": "1"},
         )
 
     def _render_grid(self, scene: dict[str, Any]) -> pn.Column:
@@ -769,7 +814,10 @@ class DashboardShell:
         return pn.pane.Bokeh(plot, sizing_mode="stretch_both")
 
     def _render_settings(self) -> pn.Card:
-        self.settings_body = pn.Column(sizing_mode="stretch_width")
+        self.settings_body = pn.Column(
+            sizing_mode="stretch_width",
+            css_classes=["td-card-body"],
+        )
         self._fill_settings()
         card = pn.Card(
             self.settings_body,
@@ -778,6 +826,7 @@ class DashboardShell:
             header_background="#fff",
             header_color="#1d2433",
             css_classes=["td-rail-card"],
+            stylesheets=[FLYOUT_CSS],
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )

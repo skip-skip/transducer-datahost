@@ -224,15 +224,15 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   `state.v2-legacy.json`.
 - [x] Scene domain operations: create and delete scenes; per-user selected scene and
   scenes-card collapse state.
-- [x] Left rail with a collapsible scenes card listing all shared scenes, with create
-  and confirmed delete.
+- [x] Left rail with a scenes card that opens to the right over the canvas, listing all
+  shared scenes, with create and confirmed delete.
 - [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
   Clicking an empty cell creates a minimum-size figure there.
-- [x] Figure title ribbon: click selects and highlights the figure and expands the
+- [x] Figure title ribbon: click selects and highlights the figure and opens the
   settings card; drag moves the figure. Layout persists across reloads and restarts.
-- [x] Collapsible settings card in the left rail: title, location (including "All
-  locations"), analyte, range (24h/7d/30d), save, and confirmed delete. Its collapse
-  state is per session; selecting a figure expands it.
+- [x] Settings card that opens to the right over the canvas: title, location (including
+  "All locations"), analyte, range (24h/7d/30d), save, and confirmed delete. Its
+  collapse state is per session; selecting a figure opens it.
 - [x] Bokeh time-series charts for every figure in the selected scene, with loading and
   inline error states.
 - [x] Panel cookie validation against the existing signed session cookie, the minimum

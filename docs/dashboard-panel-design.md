@@ -11,15 +11,15 @@ once the implementation lands.
 The dashboard becomes a Python-only Panel application mounted inside the existing
 FastAPI service. The MVP deliberately stays small:
 
-- A left rail holds two collapsible cards: **scenes** and the selected figure's
-  **settings**.
+- A left rail holds two cards, **scenes** and the selected figure's
+  **settings**, whose bodies open to the right over the canvas.
 - A scene is a named collection of figures placed in a gridded canvas.
 - Scenes can be created and deleted.
 - **All scenes are shared between all users.** There are no personal scenes.
 - Clicking an empty grid cell creates a new figure at the minimum size.
 - A figure has a title ribbon. Clicking the ribbon selects the figure; dragging
   the ribbon moves it within the grid.
-- Selecting a figure highlights it and expands the settings card in the rail.
+- Selecting a figure highlights it and opens the settings card in the rail.
 - Only time-series figures are implemented.
 
 Non-goals for this MVP:
@@ -257,12 +257,12 @@ personal/shared split and no editor allowlist in the MVP.
 
 ```text
 Shell (custom pn.Row / pn.Column with self-hosted CSS)
-├── Left rail (fixed width, two independent cards)
-│   ├── Scenes card (collapsible; collapse persists per token label)
+├── Left rail (fixed 280 px width, two independent right-opening cards)
+│   ├── Scenes card (body opens right; collapse persists per token label)
 │   │   ├── Scene list (selected scene highlighted)
 │   │   ├── + New scene
 │   │   └── Delete scene (with confirm step)
-│   └── Figure settings card (collapsible; collapse is per session)
+│   └── Figure settings card (body opens right; collapse is per session)
 │       ├── Empty state: "Select a figure"
 │       └── Selected figure
 │           ├── Title
@@ -282,7 +282,17 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
 A custom shell is preferred over a Panel template for the MVP because it keeps
 the rail simple and avoids template resource dependencies. Two independent
 `pn.Card`s are used instead of one `pn.Accordion` so the scenes and settings
-collapse states stay independent; selecting a figure expands the settings card.
+collapse states stay independent; selecting a figure opens the settings card.
+
+Each card is restyled as a horizontal flyout: its shadow root is a flex row with
+a fixed 280 px header and a 340 px body that opens to the right. The body stays
+in flow rather than absolutely positioned, so an open body reserves vertical
+space in the rail and pushes the next card header down instead of overlapping
+it; both cards can be open together. The rail is given `position: relative;
+z-index: 2` and the canvas `position: relative; z-index: 1` inline so flyouts
+paint above the Bokeh charts. Inline styles are required because `.td-rail` and
+`.td-canvas` live inside nested Bokeh shadow roots, where shell stylesheets do
+not reach.
 
 ## 7. Grid interaction specification
 
@@ -418,8 +428,8 @@ asset.
    local resources.
 3. **State v2 and domain:** schema, validation, v1 archive, scene/figure CRUD,
    layout, tests.
-4. **Scene shell:** collapsible scenes card and settings card in one left rail,
-   scene create/delete.
+4. **Scene shell:** scenes card and settings card in one left rail, bodies opening
+   to the right, scene create/delete.
 5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
    selection, layout persistence.
 6. **Figure settings and charts:** title/location/analyte/range/delete, Bokeh
