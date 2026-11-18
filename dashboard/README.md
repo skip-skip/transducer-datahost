@@ -81,11 +81,80 @@ schema upgrade.
 
 ## Development
 
-```bash
+Install the package and test tools once:
+
+```powershell
 python -m pip install -e "dashboard[dev]"
-python -m pytest dashboard/tests
-python -m ruff check dashboard
 ```
 
-Set `DASHBOARD_SECRET_KEY`, `DASHBOARD_STATE_DIR`, and `DASHBOARD_COOKIE_SECURE=false`
-for local runs. The read API must be reachable at `READ_API_URL`.
+Two local loops use fake fixtures and a temp state directory, so neither needs
+Docker, PostgreSQL, or the VM read API.
+
+Fast loop — Panel only, no login, CSP, or root-path proxy:
+
+```powershell
+.\scripts\dev_dashboard.ps1
+# http://127.0.0.1:8081/
+```
+
+`panel serve --dev` reloads the session and the browser page when a Python
+module changes. Layout, card, chart, and CSS edits are visible in about a
+second. The stylesheets live in Python strings, so they reload with the module.
+
+Prod-like loop — FastAPI + Panel, real login, cookies, CSP, and mount:
+
+```powershell
+.\scripts\dev_dashboard.ps1 -Mode prod
+# http://127.0.0.1:8080/ — sign in with token "dev"
+```
+
+`uvicorn --reload` restarts the process, so the Panel session drops and the
+browser needs a refresh. Use this loop for authentication, security headers,
+`root_path`, and integration changes.
+
+To exercise the production URL prefix in the prod-like loop:
+
+```powershell
+.\scripts\dev_dashboard.ps1 -Mode prod -RootPath /dashboard
+# http://127.0.0.1:8080/dashboard/
+```
+
+The dev server strips the prefix the way Caddy does, so login redirects, cookie
+paths, static assets, and the Panel websocket all keep the prefix. The fast
+Panel loop has no proxy and rejects `-RootPath`.
+
+Real read API instead of fixtures:
+
+```powershell
+$env:READ_API_URL = "https://172.19.68.64:8443/api"
+.\scripts\dev_dashboard.ps1 -Mode prod -RealApi -CaBundle C:\certs\server.crt
+```
+
+`-CaBundle` sets `SSL_CERT_FILE` for the VM's self-signed certificate. The URL
+host must match the certificate's subject or SAN; if it does not, use the
+hostname in `READ_API_URL`.
+
+Options:
+
+| Option | Purpose |
+|---|---|
+| `-Mode fast\|prod` | Panel-only loop (default) or FastAPI loop |
+| `-Port` | Override 8081 (fast) or 8080 (prod) |
+| `-RootPath /dashboard` | Prod mode only: serve under the production prefix |
+| `-ResetState` | Delete only `%TEMP%\transducer-dashboard-dev` |
+| `-NoSeed` | Start empty instead of creating the demo scene |
+| `-RealApi` | Use `READ_API_URL` instead of fake data |
+| `-Api URL` | Set `READ_API_URL` for this run |
+| `-CaBundle PATH` | Set `SSL_CERT_FILE` for this run |
+
+Dev state is written to `%TEMP%\transducer-dashboard-dev`, never to the
+production volume. `state.json` there is independent of the Compose volume, so
+production scenes are not visible unless you copy the file.
+
+Tests and lint:
+
+```powershell
+python -m pytest dashboard/tests
+python -m ruff check dashboard
+python -m mypy dashboard/transducer_dashboard
+```

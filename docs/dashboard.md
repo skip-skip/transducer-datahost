@@ -326,6 +326,31 @@ docker compose up -d dashboard
 Any other `StateError` means the file is genuinely malformed. Inspect
 `state.json.bak` and restore it as above rather than deleting the volume.
 
+### Local development
+
+The dashboard can run on a workstation without Docker, PostgreSQL, or the VM
+read API:
+
+```powershell
+.\scripts\dev_dashboard.ps1                     # fast Panel loop, fake data
+.\scripts\dev_dashboard.ps1 -Mode prod          # FastAPI + Panel, fake data
+```
+
+The fast loop serves `dashboard/dev_panel.py` with `panel serve --dev` on
+`http://127.0.0.1:8081/`. It reloads the browser page when a Python module
+changes, but it has no login, CSP, or root-path proxy. The prod-like loop runs
+`uvicorn --reload` on `http://127.0.0.1:8080/`, so it exercises login, cookies,
+security headers, and the Panel mount; sign in with the fake token `dev`.
+`-RealApi` uses `READ_API_URL` instead of fixtures, and `-CaBundle` sets
+`SSL_CERT_FILE` for the VM's self-signed certificate. `-Mode prod -RootPath
+/dashboard` serves under the production prefix and strips it the way Caddy does;
+the fast loop has no proxy and rejects `-RootPath`.
+
+Dev state is written to `%TEMP%\transducer-dashboard-dev`, never to the
+production volume. `-ResetState` deletes only that directory; `-NoSeed` starts
+with an empty dashboard instead of the demo scene. See
+[`../dashboard/README.md`](../dashboard/README.md#development) for all options.
+
 ## 8. Verification
 
 Automated coverage in `dashboard/tests`:
@@ -337,8 +362,9 @@ Automated coverage in `dashboard/tests`:
   self-hosted resources, and the absence of external CDN URLs.
 - Panel shell, grid, settings-card callbacks, and chart builder/windowing.
 - Read-client and settings behavior.
+- Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `177 passed`; `ruff check dashboard` and
+Latest local run: `181 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
 grid layout persistence, the empty-cell bridge, settings save/reload, and
 Bokeh chart rendering into a document.

@@ -8,6 +8,7 @@
 | `backup.sh` | Nightly `pg_dump --format=custom` plus dashboard state | Linux VM |
 | `restore.sh` | Restore a dump into a scratch or production database, or restore dashboard state | Linux VM |
 | `healthcheck.sh` | Verify containers, APIs, heartbeat, jobs, disk, and certificate; optional webhook alert | Linux VM |
+| `dev_dashboard.ps1` | Local dashboard server with fake data (fast Panel or prod-like FastAPI) | Windows dev host |
 | `_common.sh` | Shared helpers sourced by the shell scripts | — |
 
 All scripts are implemented. The shell scripts are driven by
@@ -70,6 +71,31 @@ Set `ALERT_WEBHOOK_URL` to a Slack-compatible webhook to receive alerts.
 `ALERT_ON_WARNINGS=true` includes warnings. Identical alerts are suppressed for
 `ALERT_REPEAT_SECONDS` (default 3600). See
 [docs/operations.md](../docs/operations.md#5-monitoring-and-alerting).
+
+## `dev_dashboard.ps1`
+
+```powershell
+.\scripts\dev_dashboard.ps1                     # fast Panel loop, port 8081
+.\scripts\dev_dashboard.ps1 -Mode prod          # FastAPI + Panel, port 8080
+```
+
+- Fast mode serves `dashboard/dev_panel.py` with `panel serve --dev` and reloads
+  the browser page on Python changes. There is no login, CSP, or proxy behavior.
+- Prod mode serves `dashboard/dev_fastapi.py` with `uvicorn --reload`, so it
+  exercises login, cookies, security headers, and the Panel mount. The process
+  restarts on changes; refresh the browser.
+- Both use fake fixtures by default. In prod mode, sign in with token `dev`.
+- State is isolated in `%TEMP%\transducer-dashboard-dev`; `-ResetState` deletes
+  only that directory. `-NoSeed` skips the demo scene.
+- `-RealApi` uses `READ_API_URL` instead of fixtures. `-Api` overrides the URL
+  for one run, and `-CaBundle` sets `SSL_CERT_FILE` for the VM certificate.
+- `-RootPath /dashboard` serves prod mode under the production prefix; the dev
+  server strips the prefix like Caddy. The fast loop rejects it because it has no
+  proxy. `-Port` overrides the default port.
+
+The script restores the environment variables it sets when the server exits.
+See [dashboard/README.md](../dashboard/README.md#development) for the full
+workflow and the TLS caveat.
 
 ## `upload_xle.ps1`
 
