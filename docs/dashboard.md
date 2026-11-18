@@ -71,7 +71,9 @@ base-uri 'self'; form-action 'self'; object-src 'none'
 ```
 
 `/login`, `/logout`, `/health`, and any route added later keep the strict policy,
-which omits `'unsafe-eval'` and `blob:` from `script-src`:
+which omits `'unsafe-eval'` and `blob:` from `script-src`. The relaxed policy is
+selected by route path (`/` and `/static/`), with `root_path` stripped first because
+uvicorn prepends `--root-path` to `scope["path"]`:
 
 ```text
 default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';

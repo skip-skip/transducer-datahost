@@ -124,8 +124,10 @@ policies are served. The Panel document and its static assets get:
 
 `/login`, `/logout`, `/health`, and every route added later keep the strict policy,
 identical except that `script-src` is `'self' 'unsafe-inline'`. The middleware
-allowlists the relaxed policy by path (`/` and `/static/`), so a new route cannot
-inherit `'unsafe-eval'` by accident.
+allowlists the relaxed policy by route path (`/` and `/static/`), stripping the
+`root_path` first because uvicorn prepends `--root-path` to `scope["path"]` even
+though Caddy already removed the prefix. A new route therefore cannot inherit
+`'unsafe-eval'` by accident.
 
 `'unsafe-eval'` and `blob:` are not optional configuration. `pn.layout.GridStack` is
 a `ReactiveHTML` subclass, and Panel implements `ReactiveHTML` scripts by compiling

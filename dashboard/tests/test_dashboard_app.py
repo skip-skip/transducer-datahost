@@ -1,8 +1,9 @@
 import panel as pn
 import pytest
 from fastapi.testclient import TestClient
+from starlette.requests import Request
 
-from transducer_dashboard.app import create_app
+from transducer_dashboard.app import CSP_PANEL, CSP_STRICT, _csp_for, create_app
 from transducer_dashboard.auth import COOKIE_NAME, SessionCodec
 from transducer_dashboard.panel_app import build_view
 from transducer_dashboard.read_client import ReadApiError
@@ -164,6 +165,30 @@ def _directive(csp: str, name: str) -> str:
     raise AssertionError(f"{name} missing from {csp}")
 
 
+@pytest.mark.parametrize(
+    ("path", "root_path", "relaxed"),
+    [
+        ("/", "", True),
+        ("/static/js/bokeh.min.js", "", True),
+        # Production shape: the proxy strips the prefix and uvicorn prepends
+        # --root-path to scope["path"] again, so the path arrives prefixed.
+        ("/dashboard/", "/dashboard", True),
+        ("/dashboard/static/js/bokeh.min.js", "/dashboard", True),
+        ("/dashboard", "/dashboard", True),
+        ("/login", "", False),
+        ("/dashboard/login", "/dashboard", False),
+        ("/dashboard/logout", "/dashboard", False),
+        ("/dashboard/health", "/dashboard", False),
+    ],
+)
+def test_csp_is_chosen_from_the_route_path(
+    path: str, root_path: str, relaxed: bool
+) -> None:
+    request = Request({"type": "http", "path": path, "root_path": root_path})
+
+    assert _csp_for(request) == (CSP_PANEL if relaxed else CSP_STRICT)
+
+
 def test_security_headers_wrap_panel_responses(client: TestClient) -> None:
     response = client.get("/")
 
@@ -200,6 +225,9 @@ def test_strict_csp_covers_the_non_panel_routes(
 
 
 def test_root_path_is_preserved_for_login_and_panel(tmp_path) -> None:
+    # TestClient sets scope["root_path"] without prefixing scope["path"], so this
+    # only covers the unprefixed shape. test_csp_is_chosen_from_the_route_path
+    # covers the prefixed shape that uvicorn produces in production.
     with make_client(tmp_path, root_path="/dashboard") as test_client:
         page = test_client.get("/")
         assert page.status_code == 200

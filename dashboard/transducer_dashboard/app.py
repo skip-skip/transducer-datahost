@@ -56,6 +56,11 @@ def _csp_for(request: Request) -> str:
     ``'unsafe-eval'`` by accident.
     """
     path = request.scope.get("path", "/")
+    root_path = request.scope.get("root_path", "")
+    if root_path and path.startswith(root_path):
+        # uvicorn prepends --root-path to scope["path"] even though the proxy
+        # already stripped the prefix, so compare against the route path.
+        path = path[len(root_path) :] or "/"
     if path == "/" or path.startswith("/static/"):
         return CSP_PANEL
     return CSP_STRICT
