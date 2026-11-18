@@ -276,7 +276,7 @@ service:
 - Each figure stores `id`, `title`, optional `location_id`, optional `series_id`, a
   `range` (`24h`, `7d`, `30d`), a grid `layout` (`x`, `y`, `w`, `h`), `created_at`, and
   `updated_at`.
-- `ui[<read-token label>]`: selected scene, selected figure, and scenes-card collapse
+- `ui[<read-token label>]`: selected scene, selected figure, and scenes drawer collapse
   state (stored as `scenes_tray_collapsed`).
 
 Figures bind to `transducer.series.series_id` and `transducer.location.location_id` by

@@ -145,8 +145,8 @@ Rules:
   prompt instead of a chart.
 - `range` is one of `24h`, `7d`, `30d`. New figures start at the range implied
   by `DASHBOARD_DEFAULT_WINDOW_DAYS`.
-- The selected scene, selected figure, and scenes-card collapse state are stored
-  per token label under `ui`. The settings-card collapse state is session-only
+- The selected scene, selected figure, and scenes drawer collapse state are stored
+  per token label under `ui`. The settings drawer collapse state is session-only
   and is not persisted.
 - Figure and scene IDs are UUIDs because there is no database identity column.
 
@@ -172,15 +172,17 @@ Write safety:
 
 ## 4. UI
 
-Left rail (two independent cards whose bodies open to the right over the canvas):
+Left rail (two independent left-docked drawers):
 
-The rail stays 280 px wide. Each card header sits in the rail; opening a card
-reveals its body as a 340 px flyout to the right. Bodies stay in flow, so an open
-body reserves its height in the rail and pushes the next card header down rather
-than overlapping it. Both cards can be open at once. The rail paints above the
-canvas so a flyout covers the charts underneath.
+The rail is a 44 px strip of vertical tabs at the left edge of the page. Each
+card title reads bottom-to-top, and its arrow points right when the drawer is
+closed. Opening a card reveals a 340 px body to the right over the canvas; the
+body stays in flow, so an open body reserves its height in the tab strip and
+pushes the next tab down instead of overlapping it. Both drawers can be open at
+once. The tab strip paints above the canvas so an open body covers the charts
+underneath.
 
-Scenes card:
+Scenes drawer:
 
 - Lists every shared scene; the selected scene is highlighted.
 - `+ New scene` creates and selects a scene.
@@ -188,7 +190,7 @@ Scenes card:
   figures.
 - Its collapse state persists per token label.
 
-Figure settings card:
+Figure settings drawer:
 
 - `Title`, `Location` (including "All locations"), `Analyte`, and a
   `24h`/`7d`/`30d` range.
@@ -200,7 +202,7 @@ Figure settings card:
   and a location/series pair with no readings together.
 - `Delete figure` takes two clicks (delete, then confirm).
 - Its collapse state is per browser session and resets on reload. Selecting a
-  figure (or creating one) expands the card.
+  figure (or creating one) opens the drawer.
 
 Scene canvas (right of the rail):
 
@@ -366,7 +368,7 @@ Automated coverage in `dashboard/tests`:
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, the per-route CSP, Panel mount,
   self-hosted resources, and the absence of external CDN URLs.
-- Panel shell, grid, settings-card callbacks, and chart builder/windowing.
+- Panel shell, grid, settings-drawer callbacks, and chart builder/windowing.
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
@@ -380,9 +382,9 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings card expands.
-5. Collapse each card independently. The scenes card stays collapsed after a
-   reload; the settings card resets to open.
+4. Click a ribbon; the figure highlights and the settings drawer opens.
+5. Collapse each drawer independently. The scenes drawer stays collapsed after a
+   reload; the settings drawer resets to open.
 6. Drag and resize a figure; the layout survives a reload and a restart.
 7. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
 8. Delete a figure; the scene updates and the selection clears.

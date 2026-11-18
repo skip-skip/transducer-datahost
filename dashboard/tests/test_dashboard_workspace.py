@@ -9,7 +9,12 @@ from transducer_dashboard.auth import Session
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
 from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
-from transducer_dashboard.workspace import FLYOUT_CSS, DashboardShell
+from transducer_dashboard.workspace import (
+    DRAWER_CSS,
+    DRAWER_TITLE_CSS,
+    RAIL_TAB_WIDTH,
+    DashboardShell,
+)
 
 LOCATIONS = [
     {"location_id": 1, "name": "MCMW-04"},
@@ -120,7 +125,7 @@ def test_empty_state_shows_the_create_prompt(tmp_path) -> None:
     assert shell.rail.objects == [shell.tray_card, shell.settings_card]
 
 
-def test_rail_cards_open_to_the_right(tmp_path) -> None:
+def test_rail_drawers_open_to_the_right(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
     for card, body in (
@@ -131,11 +136,20 @@ def test_rail_cards_open_to_the_right(tmp_path) -> None:
         assert body is not None
         assert body.css_classes == ["td-card-body"]
         assert card.css_classes == ["td-rail-card"]
-        assert card.stylesheets == [FLYOUT_CSS]
+        assert card.stylesheets == [DRAWER_CSS]
+        assert card.header is not None
+        assert card.header.css_classes == ["td-drawer-title"]
+        assert card.header.stylesheets == [DRAWER_TITLE_CSS]
 
-    assert "flex-direction: row" in FLYOUT_CSS
+    assert "flex-direction: row" in DRAWER_CSS
+    assert "writing-mode: vertical-rl" in DRAWER_TITLE_CSS
     assert shell.rail is not None
-    assert shell.rail.styles == {"position": "relative", "z-index": "2"}
+    assert shell.rail.width == RAIL_TAB_WIDTH
+    assert shell.rail.styles == {
+        "position": "relative",
+        "z-index": "2",
+        "overflow": "visible",
+    }
 
 
 def test_create_scene_selects_and_persists_it(tmp_path) -> None:

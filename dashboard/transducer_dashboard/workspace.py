@@ -38,12 +38,13 @@ from .state import (
     StateStore,
 )
 
-RAIL_WIDTH = 280
+RAIL_TAB_WIDTH = 44
+DRAWER_WIDTH = 340
 
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; min-height: 100vh; }
 .td-header { background: #fff; border-bottom: 1px solid #d8dde6; padding: 0.65rem 1rem; }
-.td-rail { background: #fff; border-right: 1px solid #d8dde6; }
+.td-rail { background: #fff; }
 .td-rail-card { border: 0; }
 .td-canvas { background: #fff; padding: 1rem 1.25rem; }
 .td-muted { color: #5b6472; }
@@ -59,41 +60,90 @@ SHELL_CSS = """
 .td-scene-button { text-align: left; }
 """
 
-FLYOUT_CSS = f"""
+DRAWER_CSS = f"""
 :host {{
   display: flex !important;
   flex-direction: row !important;
-  align-items: flex-start;
+  align-items: stretch !important;
   gap: 0 !important;
   overflow: visible !important;
   height: auto !important;
-  width: {RAIL_WIDTH}px !important;
+  width: {RAIL_TAB_WIDTH}px !important;
   min-width: 0 !important;
-  max-width: {RAIL_WIDTH}px !important;
+  max-width: {RAIL_TAB_WIDTH}px !important;
   background: #fff;
   box-shadow: none !important;
   outline: none !important;
 }}
 .card-header {{
-  flex: 0 0 {RAIL_WIDTH}px !important;
-  width: {RAIL_WIDTH}px !important;
+  flex: 0 0 {RAIL_TAB_WIDTH}px !important;
+  width: {RAIL_TAB_WIDTH}px !important;
+  min-height: 140px !important;
+  height: auto !important;
   margin-right: 0 !important;
+  padding: 0.5rem 0 !important;
   position: static !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+  border: 0 !important;
+  border-right: 1px solid #d8dde6;
   border-bottom: 1px solid #d8dde6;
+  border-radius: 0 !important;
+  background: #fff !important;
+}}
+.card-button {{
+  margin: 0 0 0.5rem 0 !important;
+  flex: none;
+}}
+.card-header-row {{
+  align-self: stretch !important;
+  justify-content: center !important;
+  align-items: center !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  width: auto !important;
+  height: auto !important;
+  max-height: none !important;
 }}
 .td-card-body {{
-  flex: 0 0 340px !important;
-  width: 340px !important;
-  max-width: calc(100vw - {RAIL_WIDTH}px) !important;
+  flex: 0 0 {DRAWER_WIDTH}px !important;
+  width: {DRAWER_WIDTH}px !important;
+  max-width: calc(100vw - {RAIL_TAB_WIDTH}px) !important;
   min-width: 0 !important;
   height: auto !important;
   background: #fff;
   border: 1px solid #d8dde6;
   border-left: 0;
   padding: 0.75rem;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  box-shadow: 6px 0 16px rgba(0, 0, 0, 0.12);
 }}
 """
+
+DRAWER_TITLE_CSS = """
+:host {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  align-self: center !important;
+  font-size: 1rem;
+  font-weight: 600;
+  white-space: nowrap;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+"""
+
+
+def drawer_title(text: str) -> pn.pane.HTML:
+    """A vertical tab label that reads bottom-to-top."""
+
+    return pn.pane.HTML(
+        f"<span>{html.escape(text)}</span>",
+        css_classes=["td-drawer-title"],
+        stylesheets=[DRAWER_TITLE_CSS],
+        margin=0,
+    )
 
 
 class DashboardShell:
@@ -567,10 +617,14 @@ class DashboardShell:
         self.rail = pn.Column(
             self._render_tray(),
             self._render_settings(),
-            width=RAIL_WIDTH,
+            width=RAIL_TAB_WIDTH,
             css_classes=["td-rail"],
             margin=(0, 0, 0, 0),
-            styles={"position": "relative", "z-index": "2"},
+            styles={
+                "position": "relative",
+                "z-index": "2",
+                "overflow": "visible",
+            },
         )
         return self.rail
 
@@ -583,12 +637,12 @@ class DashboardShell:
         )
         card = pn.Card(
             self.tray_body,
-            title="Scenes",
+            header=drawer_title("Scenes"),
             collapsed=self._tray_collapsed,
             header_background="#fff",
             header_color="#1d2433",
             css_classes=["td-rail-card"],
-            stylesheets=[FLYOUT_CSS],
+            stylesheets=[DRAWER_CSS],
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )
@@ -821,12 +875,12 @@ class DashboardShell:
         self._fill_settings()
         card = pn.Card(
             self.settings_body,
-            title="Figure settings",
+            header=drawer_title("Figure settings"),
             collapsed=self._settings_collapsed,
             header_background="#fff",
             header_color="#1d2433",
             css_classes=["td-rail-card"],
-            stylesheets=[FLYOUT_CSS],
+            stylesheets=[DRAWER_CSS],
             sizing_mode="stretch_width",
             margin=(0, 0, 0, 0),
         )

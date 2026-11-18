@@ -16,24 +16,24 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
   list of figures.
 - Each figure binds to an optional `location_id` and `series_id`, a range
   (`24h`, `7d`, `30d`), and a grid layout (`x`, `y`, `w`, `h`).
-- `ui[<token label>]`: the selected scene, selected figure, and scenes-card
-  collapse state for each user. The settings-card collapse state is per session
+- `ui[<token label>]`: the selected scene, selected figure, and scenes drawer
+  collapse state for each user. The settings drawer collapse state is per session
   and is not stored.
 
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
 
 In the browser, click an empty grid cell to add a figure, click its title ribbon
-to select it and open the settings card, and drag the ribbon to move it. Layout
+to select it and open the settings drawer, and drag the ribbon to move it. Layout
 changes are saved immediately to the shared state.
 
-The two rail cards (scenes and figure settings) open to the right over the
-canvas rather than downward. Headers stay in the 280 px rail and bodies appear as
-340 px flyouts; open bodies stay in flow, so they push the next card header down
-instead of overlapping. The rail paints above the canvas so flyouts cover the
-charts underneath.
+The two rail drawers (scenes and figure settings) are left-docked: their
+titles are vertical tabs in a 44 px strip at the left edge, and opening one
+reveals a 340 px body to the right over the canvas. Open bodies stay in flow, so
+they push the next tab down instead of overlapping. The tab strip paints above
+the canvas so open drawers cover the charts underneath.
 
-The settings card edits the title, location, analyte, and range (`24h`, `7d`,
+The settings drawer edits the title, location, analyte, and range (`24h`, `7d`,
 `30d`). Saving verifies the analyte against the read API: an unknown series is
 rejected, and a series with no readings at the chosen location is rejected.
 Deleting a figure takes two clicks (delete, then confirm).

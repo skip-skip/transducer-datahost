@@ -11,15 +11,15 @@ once the implementation lands.
 The dashboard becomes a Python-only Panel application mounted inside the existing
 FastAPI service. The MVP deliberately stays small:
 
-- A left rail holds two cards, **scenes** and the selected figure's
-  **settings**, whose bodies open to the right over the canvas.
+- A left rail of vertical drawer tabs holds two cards, **scenes** and the
+  selected figure's **settings**, whose bodies open to the right over the canvas.
 - A scene is a named collection of figures placed in a gridded canvas.
 - Scenes can be created and deleted.
 - **All scenes are shared between all users.** There are no personal scenes.
 - Clicking an empty grid cell creates a new figure at the minimum size.
 - A figure has a title ribbon. Clicking the ribbon selects the figure; dragging
   the ribbon moves it within the grid.
-- Selecting a figure highlights it and opens the settings card in the rail.
+- Selecting a figure highlights it and opens the settings drawer.
 - Only time-series figures are implemented.
 
 Non-goals for this MVP:
@@ -248,7 +248,7 @@ The domain layer is plain Python and is testable without Panel.
   - Accepts a batch keyed by figure ID.
   - Validates bounds and minimum size.
 - `set_ui(state, label, **changes) -> None`
-  - Stores selection and scenes-card state per user.
+  - Stores selection and scenes drawer state per user.
 
 Any valid read token may create or delete scenes and edit figures. There is no
 personal/shared split and no editor allowlist in the MVP.
@@ -257,12 +257,12 @@ personal/shared split and no editor allowlist in the MVP.
 
 ```text
 Shell (custom pn.Row / pn.Column with self-hosted CSS)
-├── Left rail (fixed 280 px width, two independent right-opening cards)
-│   ├── Scenes card (body opens right; collapse persists per token label)
+├── Left drawer rail (44 px vertical tabs, two independent right-opening drawers)
+│   ├── Scenes drawer (collapse persists per token label)
 │   │   ├── Scene list (selected scene highlighted)
 │   │   ├── + New scene
 │   │   └── Delete scene (with confirm step)
-│   └── Figure settings card (body opens right; collapse is per session)
+│   └── Figure settings drawer (collapse is per session)
 │       ├── Empty state: "Select a figure"
 │       └── Selected figure
 │           ├── Title
@@ -282,17 +282,19 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
 A custom shell is preferred over a Panel template for the MVP because it keeps
 the rail simple and avoids template resource dependencies. Two independent
 `pn.Card`s are used instead of one `pn.Accordion` so the scenes and settings
-collapse states stay independent; selecting a figure opens the settings card.
+collapse states stay independent; selecting a figure opens the settings drawer.
 
-Each card is restyled as a horizontal flyout: its shadow root is a flex row with
-a fixed 280 px header and a 340 px body that opens to the right. The body stays
-in flow rather than absolutely positioned, so an open body reserves vertical
-space in the rail and pushes the next card header down instead of overlapping
-it; both cards can be open together. The rail is given `position: relative;
-z-index: 2` and the canvas `position: relative; z-index: 1` inline so flyouts
-paint above the Bokeh charts. Inline styles are required because `.td-rail` and
-`.td-canvas` live inside nested Bokeh shadow roots, where shell stylesheets do
-not reach.
+Panel 1.10 has no built-in drawer component, so each card is restyled as a
+left-docked drawer. Its shadow root is a flex row with a 44 px vertical tab and
+a 340 px body that opens to the right. The tab title is a custom header pane
+with `writing-mode: vertical-rl` so it reads bottom-to-top; Panel's built-in
+chevron points right while the drawer is closed. The body stays in flow rather
+than absolutely positioned, so an open body reserves vertical space in the tab
+strip and pushes the next tab down instead of overlapping it; both drawers can
+be open together. The rail is given inline `position: relative; z-index: 2` and
+the canvas `position: relative; z-index: 1` so open drawers paint above the
+Bokeh charts. Inline styles are required for the rail and canvas because they
+live inside nested Bokeh shadow roots, where shell stylesheets do not reach.
 
 ## 7. Grid interaction specification
 
@@ -324,7 +326,7 @@ not reach.
 - A drag stop sets a short-lived flag so the click handler does not also select
   the figure after a move.
 - A real click selects the figure, updates the highlight, and populates the
-  settings card.
+  settings drawer.
 
 ### Selection highlight
 
@@ -406,7 +408,7 @@ Manual browser checklist:
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a restart preserves the remaining scenes.
 3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings card expands.
+4. Click a ribbon; the figure highlights and the settings drawer opens.
 5. Drag a ribbon; the figure moves and the layout survives a reload and a
    container restart.
 6. Resize a figure; the minimum size is enforced and the layout persists.
@@ -428,8 +430,8 @@ asset.
    local resources.
 3. **State v2 and domain:** schema, validation, v1 archive, scene/figure CRUD,
    layout, tests.
-4. **Scene shell:** scenes card and settings card in one left rail, bodies opening
-   to the right, scene create/delete.
+4. **Scene shell:** left drawer rail with vertical scenes and settings tabs whose
+   bodies open to the right, scene create/delete.
 5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
    selection, layout persistence.
 6. **Figure settings and charts:** title/location/analyte/range/delete, Bokeh
