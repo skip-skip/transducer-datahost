@@ -395,8 +395,10 @@ existing card in place; it does not rebuild the grid.
   `update_layout`.
 - The initial render write is ignored.
 - Layout is saved immediately on stop; no debounce is needed because GridStack
-  only publishes state at the end of an interaction.
-- A small status line reports `Saved` or the error.
+  only publishes state at the end of an interaction. Saving is silent.
+- Errors and confirmations appear as a fixed toast in the bottom-right corner
+  that fades out after 3 seconds. The toast is out of the layout flow, so it
+  never moves the canvas.
 
 ### Scene switching
 

@@ -220,6 +220,18 @@ def test_the_header_shows_no_scene_before_one_is_selected(tmp_path) -> None:
     assert "figure" not in shell.header.object
 
 
+def test_the_notice_is_a_fixed_toast(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.notice.visible is False
+    assert shell.view.objects[-1] is shell.notice
+    styles = " ".join(str(sheet) for sheet in shell.notice.stylesheets)
+    assert "position: fixed" in styles
+    assert "right: 1rem" in styles
+    assert "bottom: 1rem" in styles
+    assert "animation: td-notice-dismiss 3s" in styles
+
+
 def test_only_the_selected_scene_is_highlighted(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     first = shell.create_scene()
@@ -457,8 +469,8 @@ def test_selecting_an_unknown_scene_shows_an_error(tmp_path) -> None:
 
     shell.select_scene("missing")
 
-    assert shell.status_pane.visible is True
-    assert "selected scene not found" in shell.status_pane.object
+    assert shell.notice.visible is True
+    assert "selected scene not found" in shell.notice.object
 
 
 def test_deleting_without_a_selected_scene_shows_an_error(tmp_path) -> None:
@@ -466,8 +478,8 @@ def test_deleting_without_a_selected_scene_shows_an_error(tmp_path) -> None:
 
     shell.request_delete_scene()
 
-    assert shell.status_pane.visible is True
-    assert "Select a scene to delete" in shell.status_pane.object
+    assert shell.notice.visible is True
+    assert "Select a scene to delete" in shell.notice.object
 
 
 @pytest.mark.parametrize("label", ["alice", "bob"])
@@ -573,8 +585,8 @@ def test_a_full_scene_reports_instead_of_overlapping(tmp_path, monkeypatch) -> N
 
     assert figure is None
     assert shell.selected_scene_id == scene["id"]
-    assert shell.status_pane.visible is True
-    assert "no room for another figure" in shell.status_pane.object
+    assert shell.notice.visible is True
+    assert "no room for another figure" in shell.notice.object
     assert len(shell.figure_cards) == 1
 
 
@@ -667,8 +679,7 @@ def test_dragging_a_figure_persists_the_layout(tmp_path) -> None:
     layouts = figure_layouts(store)
     assert layouts[first["id"]] == {"x": 0, "y": 4, "w": 3, "h": 2}
     assert layouts[second["id"]] == {"x": 6, "y": 0, "w": 3, "h": 2}
-    assert shell.status_pane.visible is True
-    assert "Saved" in shell.status_pane.object
+    assert shell.notice.visible is False
 
     reloaded, _ = make_shell(tmp_path)
     assert reloaded.grid is not None
@@ -706,7 +717,7 @@ def test_an_identical_grid_state_is_not_rewritten(tmp_path) -> None:
     )
 
     assert store.path.read_text(encoding="utf-8") == before
-    assert shell.status_pane.visible is False
+    assert shell.notice.visible is False
 
 
 def test_an_overlapping_layout_is_rejected(tmp_path) -> None:
@@ -728,8 +739,8 @@ def test_an_overlapping_layout_is_rejected(tmp_path) -> None:
         )
     )
 
-    assert shell.status_pane.visible is True
-    assert "overlap" in shell.status_pane.object
+    assert shell.notice.visible is True
+    assert "overlap" in shell.notice.object
     assert figure_layouts(store) == before
 
 
@@ -821,8 +832,8 @@ def test_publishing_updates_the_figure_and_the_ribbon(tmp_path) -> None:
     assert shell.settings_publish.label == "Published"
     assert shell.settings_publish.disabled is True
     assert "figure-unpublished" not in shell.figure_cards[figure["id"]].css_classes
-    assert shell.status_pane.visible is True
-    assert "Published" in shell.status_pane.object
+    assert shell.notice.visible is True
+    assert "Published" in shell.notice.object
 
 
 def test_reverting_a_field_to_the_stored_value_clears_the_draft(tmp_path) -> None:
@@ -1369,6 +1380,6 @@ def test_publishing_a_remotely_deleted_figure_reports_it(tmp_path) -> None:
     shell.settings_publish.clicks += 1
 
     assert shell.conflict_modal.open is False
-    assert shell.status_pane.visible is True
-    assert "deleted" in shell.status_pane.object.lower()
+    assert shell.notice.visible is True
+    assert "deleted" in shell.notice.object.lower()
     assert shell.has_unpublished_changes(figure["id"]) is False

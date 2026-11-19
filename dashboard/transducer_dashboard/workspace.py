@@ -81,6 +81,35 @@ HEADER_RIGHT_STYLE = (
 )
 MUTED_STYLE = "color:#5b6472;"
 
+# The notice is an HTML pane too, so it carries its own stylesheet. Fixing it to
+# the viewport keeps transient messages out of the shell's layout.
+NOTICE_CSS = """
+:host {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 9999;
+  width: auto;
+  max-width: min(28rem, calc(100vw - 2rem));
+  pointer-events: none;
+}
+.td-notice {
+  margin: 0;
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #d8dde6;
+  border-radius: 0.4rem;
+  background: #fff;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.16);
+  color: #1d2433;
+  animation: td-notice-dismiss 3s forwards;
+}
+.td-notice-error { color: #a11616; border-color: #e3b4b4; }
+@keyframes td-notice-dismiss {
+  0%, 85% { opacity: 1; }
+  100% { opacity: 0; visibility: hidden; }
+}
+"""
+
 RAIL_CSS = """
 :host {
   min-width: 0 !important;
@@ -205,8 +234,6 @@ class DashboardShell:
         self._tray_collapsed = False
         self._settings_collapsed = False
         self._delete_confirm = False
-        self._status = ""
-        self._status_is_error = False
 
         # Session-local drafts keyed by figure ID. A draft holds only the
         # settings fields the user has changed, so publishing writes just those
@@ -220,7 +247,7 @@ class DashboardShell:
         self._scene_buttons: dict[str, pn.widgets.Button] = {}
         self.confirm_delete_button: pn.widgets.Button | None = None
         self.cancel_delete_button: pn.widgets.Button | None = None
-        self.status_pane: pn.pane.HTML | None = None
+        self.notice: pn.pane.HTML
         self.header: pn.pane.HTML | None = None
         self._grid: SceneGrid | None = None
         self._figure_cards: dict[str, FigureCard] = {}
@@ -260,6 +287,13 @@ class DashboardShell:
         )
 
         self.conflict_modal = self._build_conflict_modal()
+        self._notice_seq = 0
+        self.notice = pn.pane.HTML(
+            "",
+            visible=False,
+            stylesheets=[NOTICE_CSS],
+            margin=0,
+        )
 
         self._load()
         self.refresh()
@@ -348,7 +382,7 @@ class DashboardShell:
             self._state = self.store.load()
             self._selected_scene_id = self._resolve_scene(previous)
             self._selected_figure_id = None
-            self._set_status(str(exc), error=True)
+            self._notify(str(exc), error=True)
 
     # -- public actions ----------------------------------------------------
 
@@ -373,7 +407,7 @@ class DashboardShell:
         self._selected_figure_id = None
         self._cancel_pending_publish()
         self._delete_confirm = False
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
 
     def _on_create_scene(self, event: Any = None) -> None:
@@ -403,22 +437,22 @@ class DashboardShell:
         self._selected_scene_id = scene["id"]
         self._selected_figure_id = None
         self._delete_confirm = False
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
         return scene
 
     def request_delete_scene(self, event: Any = None) -> None:
         if self._selected_scene_id is None:
-            self._set_status("Select a scene to delete.", error=True)
+            self._notify("Select a scene to delete.", error=True)
             self.refresh()
             return
         self._delete_confirm = True
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
 
     def cancel_delete_scene(self, event: Any = None) -> None:
         self._delete_confirm = False
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
 
     def confirm_delete_scene(self, event: Any = None) -> None:
@@ -451,7 +485,7 @@ class DashboardShell:
         self._selected_scene_id = next_id
         self._selected_figure_id = None
         self._delete_confirm = False
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
 
     def toggle_scenes_tray(self, event: Any = None) -> None:
@@ -493,7 +527,7 @@ class DashboardShell:
 
         self._selected_figure_id = figure_id
         self._cancel_pending_publish()
-        self._clear_status()
+        self._clear_notice()
         self._update_selection()
 
     def _default_range(self) -> str:
@@ -530,7 +564,7 @@ class DashboardShell:
 
         self._selected_figure_id = figure["id"]
         self._delete_confirm = False
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
         return figure
 
@@ -574,7 +608,6 @@ class DashboardShell:
         except (scenes.SceneError, StateError) as exc:
             self._recover(str(exc))
             return
-        self._set_status("Saved")
 
     def _selected_figure(self) -> dict[str, Any] | None:
         if self._selected_scene_id is None or self._selected_figure_id is None:
@@ -722,30 +755,22 @@ class DashboardShell:
         if self.settings_body is not None:
             self._fill_settings()
 
-    # -- status ------------------------------------------------------------
+    # -- notices -----------------------------------------------------------
 
-    def _set_status(self, message: str, *, error: bool = False) -> None:
-        self._status = message
-        self._status_is_error = error
-        self._refresh_status()
-
-    def _clear_status(self) -> None:
-        self._status = ""
-        self._status_is_error = False
-        self._refresh_status()
-
-    def _refresh_status(self) -> None:
-        if self.status_pane is None:
-            return
-        if not self._status:
-            self.status_pane.object = ""
-            self.status_pane.visible = False
-            return
-        css = "td-status td-status-error" if self._status_is_error else "td-status"
-        self.status_pane.object = (
-            f'<p class="{css}">{html.escape(self._status)}</p>'
+    def _notify(self, message: str, *, error: bool = False) -> None:
+        css = "td-notice td-notice-error" if error else "td-notice"
+        # The sequence number restarts the CSS fade when the same message is
+        # shown again before the pane's value would otherwise be unchanged.
+        self._notice_seq += 1
+        self.notice.object = (
+            f'<p class="{css}" data-seq="{self._notice_seq}">'
+            f"{html.escape(message)}</p>"
         )
-        self.status_pane.visible = True
+        self.notice.visible = True
+
+    def _clear_notice(self) -> None:
+        self.notice.object = ""
+        self.notice.visible = False
 
     def _recover(self, message: str) -> None:
         """Reload the latest state after a failed operation and show the error."""
@@ -755,7 +780,7 @@ class DashboardShell:
         self._selected_scene_id = self._resolve_scene(previous)
         self._selected_figure_id = None
         self._delete_confirm = False
-        self._set_status(message, error=True)
+        self._notify(message, error=True)
         self.refresh()
 
     # -- rendering ---------------------------------------------------------
@@ -773,7 +798,6 @@ class DashboardShell:
         self.rail = None
         self._view.objects = [
             self._render_header(),
-            self._render_status(),
             pn.Row(
                 self._render_rail(),
                 self._render_canvas(),
@@ -781,6 +805,7 @@ class DashboardShell:
                 styles={"min-height": "0"},
             ),
             self.conflict_modal,
+            self.notice,
         ]
 
     def _render_header(self) -> pn.pane.HTML:
@@ -819,13 +844,6 @@ class DashboardShell:
             sizing_mode="stretch_width",
         )
         return self.header
-
-    def _render_status(self) -> pn.pane.HTML:
-        self.status_pane = pn.pane.HTML(
-            "", visible=False, sizing_mode="stretch_width"
-        )
-        self._refresh_status()
-        return self.status_pane
 
     def _render_rail(self) -> pn.Row:
         self.rail = pn.Row(
@@ -1445,7 +1463,7 @@ class DashboardShell:
         )
         if stored is None:
             self._drop_draft(target_figure)
-            self._set_status("This figure was deleted.", error=True)
+            self._notify("This figure was deleted.", error=True)
             self.refresh()
             return
 
@@ -1521,7 +1539,7 @@ class DashboardShell:
             self._state = self.store.load()
             self._selected_scene_id = self._resolve_scene(target_scene)
             self._selected_figure_id = None
-            self._set_status("This figure was deleted.", error=True)
+            self._notify("This figure was deleted.", error=True)
             self.refresh()
             return
         except (scenes.SceneError, StateError) as exc:
@@ -1534,7 +1552,7 @@ class DashboardShell:
             card.set_chart(self._render_chart(figure))
         self._update_figure_indicators()
         self._set_settings_message("")
-        self._set_status("Published")
+        self._notify("Published")
 
     # -- publish conflict modal --------------------------------------------
 
@@ -1610,7 +1628,7 @@ class DashboardShell:
             self._selected_figure_id = figure_id if found is not None else None
         else:
             self._selected_figure_id = None
-        self._set_status("Reverted to the published figure.")
+        self._notify("Reverted to the published figure.")
         self.refresh()
 
     def _validate_figure_selection(
@@ -1657,5 +1675,5 @@ class DashboardShell:
         self._selected_figure_id = None
         self._figure_delete_confirm_id = None
         self._drop_draft(figure_id)
-        self._clear_status()
+        self._clear_notice()
         self.refresh()
