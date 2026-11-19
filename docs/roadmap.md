@@ -227,8 +227,10 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Left ribbon rail with full-height vertical tabs stacked left-to-right; the scenes
   drawer is leftmost and opens to the right, pushing the settings drawer and the canvas.
   It lists all shared scenes, with create and confirmed delete.
-- [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2.
-  Clicking an empty cell creates a minimum-size figure there.
+- [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2
+  and a bottom-right tool dial. Add paints a free footprint and creates a figure with that
+  span; Arrange moves and resizes figures without creating them; Lock freezes the layout.
+  The tool choice is session-local and resets to Arrange on reload.
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:
@@ -241,15 +243,16 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [x] Tests for state v2, scene/figure operations, and the Panel mount.
-- [x] Tests for the Panel scene-shell, grid, and settings-drawer callbacks.
+- [x] Tests for the Panel scene-shell, grid (tool modes and Add-mode painting), and
+  settings-drawer callbacks.
 - [x] Tests for the chart builder.
 
 **Exit criteria**
 
 - [x] Login with a read token works; an invalid or missing session shows the sign-in path.
 - [x] Create and delete scenes; a container restart preserves the remaining scenes.
-- [x] Clicking an empty cell creates a minimum-size figure; a full scene reports instead
-  of overlapping figures.
+- [x] Add mode creates a figure with the painted span; painting stops at occupied cells and
+  a conflicting span reports instead of overlapping figures.
 - [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
   and restart. (Selection and layout persistence are automated; dragging needs the
   browser checklist.)

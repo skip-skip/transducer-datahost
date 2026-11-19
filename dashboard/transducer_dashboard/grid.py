@@ -355,7 +355,6 @@ class SceneGrid(pn.layout.GridStack):
           if (mode !== 'add') {
             clear_paint();
           }
-          state.mode = mode;
         }
         state.apply_mode = apply_mode;
         apply_mode(data.tool_mode);

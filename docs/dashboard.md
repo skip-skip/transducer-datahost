@@ -229,9 +229,17 @@ Scene canvas (right of the drawers):
 - A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
 - The canvas is light gray with 1 px grid lines on the cell boundaries, so
   empty cells read as a working grid behind the white figure cards.
-- Clicking an empty cell creates a minimum-size figure at that cell. If the cell
-  cannot fit one, the first free slot is used; a full scene reports instead of
-  overlapping figures.
+- A speed dial fixed to the bottom-right selects the canvas tool: **Add**,
+  **Arrange** (the default), or **Lock**. The choice is session-local: it is not
+  saved and resets to Arrange on reload. The dial stays visible but is disabled
+  while no scene is selected.
+- **Arrange** moves and resizes figures. Clicking an empty cell no longer
+  creates a figure.
+- **Add** paints a new figure. Hovering an empty cell shows the minimum 3 x 2
+  footprint; dragging grows the highlight toward the cursor and stops at the
+  first occupied cell. Releasing creates a figure with exactly that span and
+  selects it. A drag that starts on a figure is ignored.
+- **Lock** disables moving, resizing, and painting.
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
   to resize. Layouts persist immediately and survive reloads and restarts.
@@ -390,44 +398,52 @@ Automated coverage in `dashboard/tests`:
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, the per-route CSP, Panel mount,
   self-hosted resources, and the absence of external CDN URLs.
-- Panel shell, grid, settings-drawer callbacks, and chart builder/windowing.
+- Panel shell, grid, tool modes, Add-mode painting, settings-drawer callbacks,
+  and chart builder/windowing.
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `198 passed`; `ruff check dashboard` and
+Latest local run: `225 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
-grid layout persistence, the empty-cell bridge, settings publish/reload, and
-Bokeh chart rendering into a document.
+grid layout persistence, the tool-mode speed dial, the paint bridge, settings
+publish/reload, and Bokeh chart rendering into a document.
 
 Manual browser checklist:
 
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
-3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings drawer keeps its
-   current open/closed state.
-5. Collapse each drawer independently. The scenes drawer stays collapsed after a
+3. In Arrange, click an empty cell: nothing is created. Drag a ribbon to move a
+   figure and drag its corner to resize; the layout survives a reload and a
+   restart.
+4. Open the dial and choose Add. Hover empty cells to see the 3 x 2 preview;
+   drag to paint a larger footprint and release. The figure appears with that
+   exact span and is selected. Painting stops at an existing figure, and a drag
+   that starts on a figure does nothing.
+5. Choose Lock; figures no longer move or resize and painting is unavailable.
+   Reload; the dial returns to Arrange.
+6. Collapse each drawer independently. The scenes drawer stays collapsed after a
    reload; the settings drawer resets to open.
-6. Drag and resize a figure; the layout survives a reload and a restart.
-7. Set title, location, analyte, and range without publishing; the figure card
+7. Click a ribbon; the figure highlights and the settings drawer keeps its
+   current open/closed state.
+8. Set title, location, analyte, and range without publishing; the figure card
    gets a yellow border (orange while selected), the chart previews the draft,
    and the button reads `Publish`. Reload; the draft is gone and the card is
    unmarked.
-8. Publish; the button changes to `Published`, the border clears, the chart
+9. Publish; the button changes to `Published`, the border clears, the chart
    renders for 24h/7d/30d, and the change survives a reload.
-9. In a second session, edit the same setting and publish, then publish the first
-   session's draft; the conflict modal appears. Overwrite keeps the first
-   session's value; Revert restores the second session's value.
-10. Delete a figure; the scene updates, the selection clears, and any draft for
+10. In a second session, edit the same setting and publish, then publish the first
+    session's draft; the conflict modal appears. Overwrite keeps the first
+    session's value; Revert restores the second session's value.
+11. Delete a figure; the scene updates, the selection clears, and any draft for
     it is dropped.
-11. Log in with a second token; the same scenes are visible.
-12. Confirm no `POSTGRES_*` variables in the dashboard container.
-13. Confirm no external network requests in the browser network log. The
+12. Log in with a second token; the same scenes are visible.
+13. Confirm no `POSTGRES_*` variables in the dashboard container.
+14. Confirm no external network requests in the browser network log. The
     `cdn.jsdelivr.net/*.map` messages that appear with devtools open are blocked
     source-map fetches from local bundle comments, not code loads.
-14. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
+15. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
     `/login` still returns the strict CSP without `'unsafe-eval'`.
-15. Test backup and restore of the volume.
+16. Test backup and restore of the volume.
 
 ## 9. Boundaries
 

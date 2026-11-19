@@ -283,6 +283,7 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
         └── FigureCard
             ├── FigureRibbon (Button; drag handle; click to select)
             └── ChartPane (Bokeh figure or placeholder)
+└── Speed dial (fixed bottom-right; Add / Arrange / Lock)
 ```
 
 The header is a single `pn.pane.HTML` using a CSS grid (`1fr auto 1fr`) so the
@@ -333,8 +334,8 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 
 - set the GridStack `handle` option to `.figure-ribbon`;
 - set `minW = 3` and `minH = 2`;
-- attach a background click listener for empty-cell creation;
-- ignore clicks that originate inside a `.grid-stack-item`;
+- toggle moving and resizing from the canvas tool mode;
+- paint a free rectangle in Add mode and report it to Python;
 - publish the measured cell width and height as CSS variables for the grid
   background.
 
@@ -347,26 +348,59 @@ the cell size GridStack actually snaps to rather than a fixed guess. The rule
 lives in `GRID_CSS` because the canvas is inside the grid component's shadow
 root, where the shell stylesheet cannot reach.
 
-### Empty-cell click
+### Tool modes
 
-1. The browser computes the clicked cell with GridStack's
-   `getCellFromPixel({left, top}, true)`.
-2. If the cell is inside an existing item, the event is ignored.
-3. The cell is written to a `cell_click` string parameter on the grid and synced
-   to Python.
-4. A Python watcher creates a minimum-size figure at that cell.
-5. If the minimum-size figure does not fit, the watcher finds the first free
-   slot. If the scene is full, it shows a notification instead of creating a
-   figure.
+The speed dial in the bottom-right corner selects one of three canvas tools. The
+mode is session-local: it is not written to the state file and resets to
+**Arrange** on reload.
+
+- **Add** paints a new figure footprint on empty cells.
+- **Arrange** (default) moves and resizes figures; it does not create figures.
+- **Lock** freezes the layout: no moving, resizing, or painting.
+
+`SceneGrid.tool_mode` is a `param.ObjectSelector`. Its script calls
+`gridstack.enableMove()` and `enableResize()` only for Arrange and toggles the
+`td-mode-add` / `td-mode-lock` classes that set the cursor and suppress
+selection. The shell keeps the authoritative mode and passes it to each new grid
+after a refresh, so rebuilding the canvas does not drop the selection.
+
+The dial is a fixed `pn.Column` with one button per mode and a round toggle. It
+is always rendered but disabled while no scene is selected. The toast moved left
+to `right: 8.75rem` so it clears the dial's 8 rem option column when the dial is
+open.
+
+### Add-mode painting
+
+1. `pointerdown` on empty canvas converts the pointer position to a cell with
+   GridStack's `getCellFromPixel({left, top}, true)`.
+2. The anchor cell must fit the 3 x 2 minimum and that rectangle must be free.
+   Otherwise the gesture is ignored.
+3. A `.td-paint` overlay shows the footprint. It is absolutely positioned from
+   the measured cell width and height, sits behind the figure cards, and has
+   `pointer-events: none`.
+4. While dragging, the rectangle grows toward the cursor one row or column at a
+   time. It stops at the first occupied cell, so a span never overlaps a figure
+   or leaves the grid. Growing left or up moves the origin with it.
+5. `pointerup` writes the span to the `figure_span` string parameter as JSON.
+   `pointercancel` and leaving the canvas clear the overlay.
+6. A Python watcher clears the parameter and calls
+   `DashboardShell.create_figure_span`, which runs `scenes.add_figure_at` inside
+   one `StateStore.mutate`. The new figure keeps the exact painted layout, is
+   selected, and is persisted immediately.
+7. `add_figure_at` validates the bounds, minimum size, and occupancy. A painted
+   span never falls back to a free slot; a conflicting write reports instead of
+   creating a figure.
+
+Hovering without pressing shows the minimum 3 x 2 preview, or nothing when the
+anchor cannot fit.
 
 ### Ribbon click versus drag
 
 - The ribbon is a Panel `Button` styled as the figure title bar.
 - GridStack uses `.figure-ribbon` as its drag handle.
-- A drag stop sets a short-lived flag so the click handler does not also select
-  the figure after a move.
-- A real click selects the figure, updates the highlight, and populates the
-  settings drawer.
+- Clicking selects the figure, updates the highlight, and populates the settings
+  drawer. Dragging moves it; both gestures start on the same handle.
+- Moving and resizing are only enabled in Arrange mode.
 
 ### Selection highlight
 
@@ -477,12 +511,17 @@ Manual browser checklist:
 
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a restart preserves the remaining scenes.
-3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings drawer keeps its
+3. In **Arrange**, click an empty cell: nothing is created. Drag a ribbon to
+   move a figure and drag its corner to resize; the layout survives a reload and
+   a container restart.
+4. Open the dial and choose **Add**. Hover empty cells to see the 3 x 2 preview;
+   drag to paint a larger footprint; release. The figure appears with exactly
+   that span. Painting stops at an existing figure, and a drag that starts on a
+   figure does nothing.
+5. Choose **Lock**: figures no longer move or resize and Add-mode painting is
+   unavailable. Reload; the dial is back on **Arrange**.
+6. Click a ribbon; the figure highlights and the settings drawer keeps its
    current open/closed state.
-5. Drag a ribbon; the figure moves and the layout survives a reload and a
-   container restart.
-6. Resize a figure; the minimum size is enforced and the layout persists.
 7. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
 8. Delete a figure; the scene updates and the selection clears.
 9. Log in with a second token; the same scenes are visible.
@@ -504,8 +543,8 @@ asset.
 4. **Scene shell:** left ribbon rail with full-height vertical scenes and settings
    tabs whose bodies open to the right and push the next drawer, scene
    create/delete.
-5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
-   selection, layout persistence.
+5. **Grid canvas:** `SceneGrid`, ribbon drag/click, selection, layout
+   persistence, the Add/Arrange/Lock speed dial, and Add-mode painting.
 6. **Figure settings and charts:** title/location/analyte/range/delete, the
    session-local draft and publish/conflict flow, Bokeh time-series rendering,
    loading and error states.
@@ -535,9 +574,11 @@ Acceptance criteria:
 - **Cookie visibility:** `pn.state.cookies` must expose the existing signed
   cookie inside the mounted app. If it does not, authentication needs a small
   redesign before proceeding.
-- **GridStack customization:** ribbon-only dragging and empty-cell clicks need a
-  `ReactiveHTML` subclass and a JavaScript-to-Python bridge. This is the most
-  custom UI work.
+- **GridStack customization:** ribbon-only dragging, the tool-mode switch, and
+  Add-mode painting need a `ReactiveHTML` subclass and JavaScript-to-Python
+  bridges. This is the most custom UI work. Painting is pointer-based, so the
+  manual browser checklist covers it; headless tests assert the script contents
+  and the Python side of the bridge.
 - **CSP:** resolved. The GridStack `ReactiveHTML` layout and the ESM shim require
   `'unsafe-eval'` and `blob:` in `script-src`; the strict policy is kept on the
   non-Panel routes. See ADR-028 for the sign-off and compensating controls.

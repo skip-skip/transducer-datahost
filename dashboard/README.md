@@ -23,11 +23,14 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
 
-In the browser, click an empty grid cell to add a figure, click its title ribbon
-to select it, and drag the ribbon to move it. Layout changes are saved
-immediately to the shared state. The settings drawer opens only from its tab;
-selecting or creating a figure updates its contents without changing whether it
-is open.
+In the browser, use the bottom-right speed dial to pick a canvas tool. **Add**
+paints a figure footprint on empty cells; **Arrange** (the default) moves and
+resizes figures; **Lock** freezes the layout. Click a figure's title ribbon to
+select it, and drag the ribbon or its lower-right corner while arranging. The
+tool choice is per session and resets to Arrange on reload. Layout changes are
+saved immediately to the shared state. The settings drawer opens only from its
+tab; selecting or creating a figure updates its contents without changing
+whether it is open.
 
 The header banner shows the brand on the left, the selected scene name and figure
 count in the center, and the signed-in user with Sign out on the right. The

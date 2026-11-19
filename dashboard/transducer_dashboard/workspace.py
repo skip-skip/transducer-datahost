@@ -91,11 +91,11 @@ MUTED_STYLE = "color:#5b6472;"
 NOTICE_CSS = """
 :host {
   position: fixed;
-  right: 5.5rem;
+  right: 8.75rem;
   bottom: 1rem;
   z-index: 9999;
   width: auto;
-  max-width: min(28rem, calc(100vw - 7rem));
+  max-width: min(28rem, calc(100vw - 10.5rem));
   pointer-events: none;
 }
 .td-notice {
@@ -869,9 +869,12 @@ class DashboardShell:
 
     def _refresh_dial(self) -> None:
         active = TOOL_MODE_LABELS[self._tool_mode]
+        enabled = self._selected_scene_id is not None
+        self.dial_button.disabled = not enabled
         self.dial_button.label = "✕" if self._dial_open else active
         for mode, button in self.mode_buttons.items():
             button.visible = self._dial_open
+            button.disabled = not enabled
             button.button_type = "primary" if mode == self._tool_mode else "light"
             prefix = "✓ " if mode == self._tool_mode else ""
             button.label = f"{prefix}{TOOL_MODE_LABELS[mode]}"

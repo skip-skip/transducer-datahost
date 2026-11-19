@@ -236,7 +236,7 @@ def test_the_notice_is_a_fixed_toast(tmp_path) -> None:
     assert shell.notice in shell.view.objects
     styles = " ".join(str(sheet) for sheet in shell.notice.stylesheets)
     assert "position: fixed" in styles
-    assert "right: 5.5rem" in styles
+    assert "right: 8.75rem" in styles
     assert "bottom: 1rem" in styles
     assert "animation: td-notice-dismiss 3s" in styles
 
@@ -252,8 +252,19 @@ def test_the_speed_dial_starts_closed_in_arrange_mode(tmp_path) -> None:
     assert shell.mode_buttons["arrange"].button_type == "primary"
 
 
+def test_the_speed_dial_is_disabled_until_a_scene_is_selected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.dial_button.disabled is True
+
+    shell.create_scene()
+
+    assert shell.dial_button.disabled is False
+
+
 def test_the_speed_dial_toggles_and_selects_a_mode(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
+    shell.create_scene()
 
     shell.dial_button.clicks += 1
 
