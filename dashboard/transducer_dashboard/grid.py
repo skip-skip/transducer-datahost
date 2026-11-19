@@ -38,6 +38,13 @@ GRID_CSS = """
   border-color: #1f6feb;
   box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18);
 }
+.figure-card.figure-unpublished {
+  border-color: #d4a017;
+}
+.figure-card.figure-unpublished.figure-selected {
+  border-color: #e8710a;
+  box-shadow: 0 0 0 2px rgba(232, 113, 10, 0.22);
+}
 .figure-ribbon.bk-btn {
   width: 100%;
   margin: 0;
@@ -97,17 +104,30 @@ class FigureCard(pn.Column):
         self.figure_id: str = figure["id"]
         self.ribbon = ribbon
         self.chart = body
+        self._selected = False
+        self._unpublished = False
 
         def handler(event: Any) -> None:
             on_select(self.figure_id)
 
         ribbon.on_click(handler)
-        self.set_selected(False)
+        self._apply_classes()
 
     def set_selected(self, selected: bool) -> None:
-        self.css_classes = ["figure-card"] + (
-            ["figure-selected"] if selected else []
-        )
+        self._selected = selected
+        self._apply_classes()
+
+    def set_unpublished(self, unpublished: bool) -> None:
+        self._unpublished = unpublished
+        self._apply_classes()
+
+    def _apply_classes(self) -> None:
+        classes = ["figure-card"]
+        if self._unpublished:
+            classes.append("figure-unpublished")
+        if self._selected:
+            classes.append("figure-selected")
+        self.css_classes = classes
 
     def set_title(self, title: str) -> None:
         self.ribbon.label = title

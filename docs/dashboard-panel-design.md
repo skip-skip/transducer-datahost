@@ -272,7 +272,7 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
 │           ├── Location select ("All locations" plus known locations)
 │           ├── Analyte select (series for the chosen location)
 │           ├── Range: 24h / 7d / 30d
-│           ├── Save
+│           ├── Publish (disabled and labeled "Published" when synced)
 │           └── Delete figure
 └── Center scene canvas
     ├── Scene title + figure count
@@ -281,6 +281,10 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
             ├── FigureRibbon (Button; drag handle; click to select)
             └── ChartPane (Bokeh figure or placeholder)
 ```
+
+A persistent `pn.Modal` is appended to the shell and opened only when a publish
+conflicts with another session's change. It offers **Overwrite** and **Revert to
+server state**.
 
 A custom shell is preferred over a Panel template for the MVP because it keeps
 the rail simple and avoids template resource dependencies. Two independent
@@ -350,6 +354,32 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 The selected figure card receives an extra CSS class. Selection updates the
 existing card in place; it does not rebuild the grid.
 
+### Draft and publish
+
+- Settings edits (title, location, analyte, range) update a session-local draft
+  keyed by figure ID. The draft holds only the fields the user changed.
+- The settings form and the figure chart render from the stored figure with the
+  draft overlaid. No state file write happens on edit.
+- A figure with a draft gets `figure-unpublished` (yellow border) and, when also
+  selected, `figure-unpublished figure-selected` (orange border). The two flags
+  are tracked separately so a selection change cannot drop the unpublished class.
+- Reverting a field to its stored value removes that override. An empty draft is
+  deleted and the button returns to `Published`.
+- `Publish` validates the effective figure (title, analyte, location/series pair),
+  then writes only the overridden fields inside one `StateStore.mutate`.
+  Location and analyte are written together when either is overridden.
+- The baseline settings signature is recorded when the draft starts. Inside the
+  mutation, only the fields being written are compared with the baseline; a
+  difference raises `PublishConflict`, writes nothing, and opens the modal.
+  A server change to a field the draft does not write is merged.
+- Overwrite reloads state, re-validates against the current figure, and
+  force-writes the draft. Revert drops the draft, reloads state, and refreshes.
+  Closing the modal keeps the draft. Selecting another figure or scene closes
+  the modal and clears the pending target.
+- Drafts survive scene switches within the session and are discarded on reload.
+  Deleting a figure or scene prunes its drafts.
+- Layout drag/resize is not part of a draft; it continues to save immediately.
+
 ### Layout persistence
 
 - Panel's `GridStack.state` updates on `dragstop` and `resizestop`.
@@ -377,7 +407,7 @@ grid is discarded. The selected scene is stored in per-user UI state.
   - `GET /locations` fills the location select.
   - `GET /locations/{id}/series` fills the analyte select.
   - "All locations" is allowed and behaves like an un-scoped figure.
-- Saving rejects a missing series and a location/series pair with no readings
+- Publishing rejects a missing series and a location/series pair with no readings
   together.
 - Empty figures show "Choose a location and analyte."
 - A failed chart shows an inline error and does not break the scene.
@@ -391,8 +421,10 @@ grid is discarded. The selected scene is stored in per-user UI state.
 - Add a process-wide `threading.RLock` to `StateStore` because Panel callbacks
   may run on multiple threads in one process.
 - Run one uvicorn worker.
-- Concurrent edits are last-write-wins. Layout saves from two users can
-  overwrite each other; this is acceptable for the MVP and documented.
+- Concurrent edits are last-write-wins for layout saves and for settings the
+  draft does not touch. A publish whose overridden fields changed since the draft
+  started raises a conflict and opens the overwrite/revert modal instead of
+  overwriting silently.
 - Backup and restore remain file-copy operations on the volume.
 
 ## 10. Security
@@ -453,8 +485,9 @@ asset.
    create/delete.
 5. **Grid canvas:** `SceneGrid`, ribbon drag/click, empty-cell creation,
    selection, layout persistence.
-6. **Figure settings and charts:** title/location/analyte/range/delete, Bokeh
-   time-series rendering, loading and error states.
+6. **Figure settings and charts:** title/location/analyte/range/delete, the
+   session-local draft and publish/conflict flow, Bokeh time-series rendering,
+   loading and error states.
 7. **Hardening:** cookie validation, CSP, in-process lock, restart/restore
    coverage.
 8. **Docs closeout:** rewrite `dashboard.md`, update `dashboard/README.md`, and
@@ -465,7 +498,7 @@ Acceptance criteria:
 - The MVP interactions in section 1 work in a browser.
 - Scenes are shared between two read tokens.
 - Layouts survive reload and container restart.
-- A figure cannot be saved with an invalid series or an incompatible
+- A figure cannot be published with an invalid series or an incompatible
   location/series pair.
 - The dashboard container still has no database credentials.
 - No database schema, role, or read-API write route is added.

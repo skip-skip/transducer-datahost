@@ -17,8 +17,8 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
 - Each figure binds to an optional `location_id` and `series_id`, a range
   (`24h`, `7d`, `30d`), and a grid layout (`x`, `y`, `w`, `h`).
 - `ui[<token label>]`: the selected scene, selected figure, and scenes drawer
-  collapse state for each user. The settings drawer collapse state is per session
-  and is not stored.
+  collapse state for each user. The settings drawer collapse state and
+  unpublished figure drafts are per session and are not stored.
 
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
@@ -38,9 +38,20 @@ canvas right, and opening settings pushes the canvas. Both drawers can be open
 at once, and both span the full height below the header.
 
 The settings drawer edits the title, location, analyte, and range (`24h`, `7d`,
-`30d`). Saving verifies the analyte against the read API: an unknown series is
-rejected, and a series with no readings at the chosen location is rejected.
-Deleting a figure takes two clicks (delete, then confirm).
+`30d`). Edits apply to a session-local draft first: the form and that figure's
+chart preview the change, and the figure card gets a yellow border (orange while
+selected) to show it is unpublished. The drawer button reads `Publish` and is
+enabled while the figure has changes; it reads `Published` and is disabled when
+the figure matches the shared state. Reloading the page discards drafts.
+
+Publishing writes only the changed settings and verifies the result against the
+read API: an unknown series is rejected, and a series with no readings at the
+chosen location is rejected. If another session changed the same settings after
+the draft started, publishing opens a modal that offers **Overwrite** or **Revert
+to server state**; closing the modal keeps the draft. Changes to other settings
+are merged because the publish only writes the fields that were edited. Layout
+drags and resizes still save immediately and are not part of a draft. Deleting a
+figure takes two clicks (delete, then confirm).
 
 Every configured figure in the selected scene loads a Bokeh time-series chart.
 Charts start from a loading placeholder and are filled in after the page

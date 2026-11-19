@@ -232,8 +232,10 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:
-  title, location (including "All locations"), analyte, range (24h/7d/30d), save, and
-  confirmed delete. Its collapse state is per session; only its tab toggles it.
+  title, location (including "All locations"), analyte, range (24h/7d/30d), publish, and
+  confirmed delete. Edits stay in a session-local draft, the card gets a yellow/orange
+  unpublished border, and publishing detects a conflicting server change and offers
+  overwrite or revert. Its collapse state is per session; only its tab toggles it.
 - [x] Bokeh time-series charts for every figure in the selected scene, with loading and
   inline error states.
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
@@ -251,8 +253,8 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
   and restart. (Selection and layout persistence are automated; dragging needs the
   browser checklist.)
-- [x] Figures cannot be saved with an invalid series or an incompatible location/series
-  pair.
+- [x] Figures cannot be published with an invalid series or an incompatible
+  location/series pair.
 - [x] Charts render for 24h/7d/30d within `DASHBOARD_MAX_POINTS`.
 - [x] Two read tokens see the same scenes.
 - [x] The dashboard container has no `POSTGRES_*` environment variables, and no database

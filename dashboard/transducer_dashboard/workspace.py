@@ -5,6 +5,12 @@ shared between every read token, while the selected scene, selected figure, and
 scene-card collapse state are stored per token label in ``state["ui"]``. The
 settings-card collapse state is session-only and never persisted.
 
+Figure edits are kept in a session-local draft until the user presses Publish.
+The draft previews in the settings form and the figure chart, and the card gets
+a yellow (unselected) or orange (selected) border while it has unpublished
+changes. Publishing writes only the changed fields; a conflicting server-side
+edit opens a modal offering overwrite or revert.
+
 Both cards are ``pn.Card`` ribbons in a row on the left edge of the screen.
 Their vertical headers stay docked as 44px tabs while their bodies open to the
 right and span the full viewport height. The scenes ribbon is leftmost; opening
@@ -148,6 +154,10 @@ DRAWER_TITLE_CSS = """
 """
 
 
+class PublishConflict(Exception):
+    """Raised inside a state mutation when publishing would overwrite a change."""
+
+
 def drawer_title(text: str) -> pn.pane.HTML:
     """A vertical tab label that reads bottom-to-top."""
 
@@ -183,6 +193,15 @@ class DashboardShell:
         self._status = ""
         self._status_is_error = False
 
+        # Session-local drafts keyed by figure ID. A draft holds only the
+        # settings fields the user has changed, so publishing writes just those
+        # fields. Baselines capture the stored values when the draft started and
+        # are used to detect a conflicting change from another session.
+        self._drafts: dict[str, dict[str, Any]] = {}
+        self._draft_baselines: dict[str, tuple[Any, ...]] = {}
+        self._suspend_settings = False
+        self._pending_publish: tuple[str, str] | None = None
+
         self._scene_buttons: dict[str, pn.widgets.Button] = {}
         self.confirm_delete_button: pn.widgets.Button | None = None
         self.cancel_delete_button: pn.widgets.Button | None = None
@@ -201,10 +220,14 @@ class DashboardShell:
         self.settings_analyte: pn.widgets.Select | None = None
         self.settings_range: pn.widgets.RadioButtonGroup | None = None
         self.settings_message: pn.pane.HTML | None = None
-        self.settings_save: pn.widgets.Button | None = None
+        self.settings_publish: pn.widgets.Button | None = None
         self.settings_delete: pn.widgets.Button | None = None
         self.settings_confirm_delete: pn.widgets.Button | None = None
         self.settings_cancel_delete: pn.widgets.Button | None = None
+        self.conflict_message: pn.pane.HTML | None = None
+        self.conflict_modal: pn.Modal | None = None
+        self.conflict_overwrite: pn.widgets.Button | None = None
+        self.conflict_revert: pn.widgets.Button | None = None
         self._figure_delete_confirm_id: str | None = None
         self._locations_cache: list[dict[str, Any]] | None = None
         self._view = pn.Column(
@@ -219,6 +242,8 @@ class DashboardShell:
             },
             margin=0,
         )
+
+        self.conflict_modal = self._build_conflict_modal()
 
         self._load()
         self.refresh()
@@ -330,6 +355,7 @@ class DashboardShell:
 
         self._selected_scene_id = scene_id
         self._selected_figure_id = None
+        self._cancel_pending_publish()
         self._delete_confirm = False
         self._clear_status()
         self.refresh()
@@ -450,6 +476,7 @@ class DashboardShell:
             return
 
         self._selected_figure_id = figure_id
+        self._cancel_pending_publish()
         self._clear_status()
         self._update_selection()
 
@@ -541,6 +568,138 @@ class DashboardShell:
             return None
         return scenes.find_figure(scene, self._selected_figure_id)
 
+    # -- unpublished drafts ------------------------------------------------
+
+    @staticmethod
+    def _figure_title(figure: dict[str, Any]) -> str:
+        return str(figure.get("title") or "Untitled figure")
+
+    @staticmethod
+    def _settings_signature(figure: dict[str, Any]) -> tuple[Any, ...]:
+        return (
+            figure["title"],
+            figure["location_id"],
+            figure["series_id"],
+            figure["range"],
+        )
+
+    def _find_figure(self, figure_id: str) -> dict[str, Any] | None:
+        for scene in self._state.get("scenes", []):
+            figure = scenes.find_figure(scene, figure_id)
+            if figure is not None:
+                return figure
+        return None
+
+    def _effective_figure(self, figure: dict[str, Any]) -> dict[str, Any]:
+        """Overlay the session-local draft on a stored figure."""
+
+        draft = self._drafts.get(figure["id"])
+        if not draft:
+            return figure
+        effective = dict(figure)
+        effective.update(draft)
+        return effective
+
+    def has_unpublished_changes(self, figure_id: str) -> bool:
+        return figure_id in self._drafts
+
+    def _drop_draft(self, figure_id: str) -> None:
+        self._drafts.pop(figure_id, None)
+        self._draft_baselines.pop(figure_id, None)
+        if self._pending_publish is not None and self._pending_publish[1] == figure_id:
+            self._pending_publish = None
+
+    def _cancel_pending_publish(self) -> None:
+        if self._pending_publish is None:
+            return
+        self._pending_publish = None
+        if self.conflict_modal is not None:
+            self.conflict_modal.open = False
+
+    def _set_draft_field(
+        self, figure_id: str, *, refresh_chart: bool = False, **fields: Any
+    ) -> None:
+        stored = self._find_figure(figure_id)
+        if stored is None:
+            return
+        if figure_id not in self._drafts:
+            self._draft_baselines[figure_id] = self._settings_signature(stored)
+        self._drafts.setdefault(figure_id, {}).update(fields)
+        self._sync_draft(figure_id, refresh_chart=refresh_chart)
+
+    def _sync_draft(self, figure_id: str, *, refresh_chart: bool = False) -> None:
+        """Drop overrides that match the stored figure and update the card."""
+
+        draft = self._drafts.get(figure_id)
+        stored = self._find_figure(figure_id)
+        if draft is None or stored is None:
+            self._drafts.pop(figure_id, None)
+            self._draft_baselines.pop(figure_id, None)
+        else:
+            cleaned = {
+                key: value
+                for key, value in draft.items()
+                if stored.get(key) != value
+            }
+            if cleaned:
+                self._drafts[figure_id] = cleaned
+            else:
+                self._drafts.pop(figure_id, None)
+                self._draft_baselines.pop(figure_id, None)
+
+        self._update_figure_indicators()
+        if refresh_chart:
+            self._refresh_figure_chart(figure_id)
+
+    def _update_figure_indicators(self) -> None:
+        for figure_id, card in self._figure_cards.items():
+            card.set_unpublished(figure_id in self._drafts)
+            figure = self._find_figure(figure_id)
+            if figure is not None:
+                card.set_title(self._figure_title(self._effective_figure(figure)))
+        self._update_publish_button()
+
+    def _update_publish_button(self) -> None:
+        button = self.settings_publish
+        if button is None:
+            return
+        unpublished = (
+            self._selected_figure_id is not None
+            and self._selected_figure_id in self._drafts
+        )
+        if unpublished:
+            button.label = "Publish"
+            button.color = "primary"
+            button.disabled = False
+        else:
+            button.label = "Published"
+            button.color = "default"
+            button.disabled = True
+
+    def _refresh_figure_chart(self, figure_id: str) -> None:
+        card = self._figure_cards.get(figure_id)
+        stored = self._find_figure(figure_id)
+        if card is None or stored is None:
+            return
+        card.set_chart(self._render_chart(self._effective_figure(stored)))
+
+    def _prune_drafts(self) -> None:
+        if not self._drafts:
+            return
+        existing: set[str] = set()
+        for scene in self._state.get("scenes", []):
+            for figure in scene.get("figures", []):
+                existing.add(figure["id"])
+        for figure_id in list(self._drafts):
+            if figure_id not in existing:
+                self._drafts.pop(figure_id, None)
+                self._draft_baselines.pop(figure_id, None)
+        if (
+            self._pending_publish is not None
+            and self._pending_publish[1] not in existing
+        ):
+            self._pending_publish = None
+
     def _update_selection(self) -> None:
         for figure_id, card in self._figure_cards.items():
             card.set_selected(figure_id == self._selected_figure_id)
@@ -586,6 +745,7 @@ class DashboardShell:
     # -- rendering ---------------------------------------------------------
 
     def refresh(self) -> None:
+        self._prune_drafts()
         self._scene_buttons = {}
         self._grid = None
         self._figure_cards = {}
@@ -604,6 +764,7 @@ class DashboardShell:
                 sizing_mode="stretch_both",
                 styles={"min-height": "0"},
             ),
+            self.conflict_modal,
         ]
 
     def _render_header(self) -> pn.pane.HTML:
@@ -804,8 +965,11 @@ class DashboardShell:
 
         cards: dict[str, FigureCard] = {}
         for figure in figures:
-            card = FigureCard(figure, on_select=self.select_figure)
+            display = dict(self._effective_figure(figure))
+            display["title"] = self._figure_title(display)
+            card = FigureCard(display, on_select=self.select_figure)
             card.set_selected(figure["id"] == self._selected_figure_id)
+            card.set_unpublished(figure["id"] in self._drafts)
             layout = figure["layout"]
             grid[
                 layout["y"] : layout["y"] + layout["h"],
@@ -853,7 +1017,9 @@ class DashboardShell:
             card = self._figure_cards.get(figure["id"])
             if card is None:
                 continue
-            card.set_chart(self._render_chart(figure))
+            card.set_chart(
+                self._render_chart(self._effective_figure(figure))
+            )
 
     def _render_chart(self, figure: dict[str, Any]) -> Any:
         series_id = figure["series_id"]
@@ -909,20 +1075,23 @@ class DashboardShell:
         self.settings_body.objects = self._settings_objects()
 
     def _settings_objects(self) -> list[Any]:
-        figure = self._selected_figure()
-        if figure is None:
+        stored = self._selected_figure()
+        if stored is None:
             self.settings_title = None
             self.settings_location = None
             self.settings_analyte = None
             self.settings_range = None
             self.settings_message = None
-            self.settings_save = None
+            self.settings_publish = None
             self.settings_delete = None
             self.settings_confirm_delete = None
             self.settings_cancel_delete = None
             return [
                 pn.pane.HTML('<p class="td-muted">Select a figure to edit it.</p>')
             ]
+
+        figure = self._effective_figure(stored)
+        figure_id = stored["id"]
 
         message = pn.pane.HTML("", visible=False, sizing_mode="stretch_width")
         self.settings_message = message
@@ -959,7 +1128,6 @@ class DashboardShell:
             sizing_mode="stretch_width",
         )
         self.settings_location = location
-        location.param.watch(self._on_settings_location_change, "value")
 
         analyte_options: list[tuple[str, str]] = [("Choose an analyte", "")]
         analyte_error = ""
@@ -993,19 +1161,20 @@ class DashboardShell:
         )
         self.settings_range = range_group
 
-        save = pn.widgets.Button(
-            label="Save",
-            color="primary",
+        publish = pn.widgets.Button(
+            label="Published",
+            color="default",
+            disabled=True,
             sizing_mode="stretch_width",
         )
-        save.on_click(self._on_save_figure)
-        self.settings_save = save
+        publish.on_click(self._on_publish_figure)
+        self.settings_publish = publish
         self.settings_delete = None
         self.settings_confirm_delete = None
         self.settings_cancel_delete = None
 
         delete_controls: list[Any]
-        if self._figure_delete_confirm_id == figure["id"]:
+        if self._figure_delete_confirm_id == figure_id:
             confirm = pn.widgets.Button(
                 label="Confirm delete",
                 color="danger",
@@ -1035,6 +1204,25 @@ class DashboardShell:
             self.settings_delete = delete
             delete_controls = [delete]
 
+        def on_title(event: Any, target: str = figure_id) -> None:
+            self._on_settings_title_change(event, target)
+
+        def on_location(event: Any, target: str = figure_id) -> None:
+            self._on_settings_location_change(event, target)
+
+        def on_analyte(event: Any, target: str = figure_id) -> None:
+            self._on_settings_analyte_change(event, target)
+
+        def on_range(event: Any, target: str = figure_id) -> None:
+            self._on_settings_range_change(event, target)
+
+        # Watchers are attached after the widgets are populated so building the
+        # form does not create drafts.
+        title.param.watch(on_title, "value")
+        location.param.watch(on_location, "value")
+        analyte.param.watch(on_analyte, "value")
+        range_group.param.watch(on_range, "value")
+
         if location_error:
             self._set_settings_message(location_error, error=True)
         elif analyte_error:
@@ -1044,12 +1232,14 @@ class DashboardShell:
         elif figure["series_id"] is None:
             self._set_settings_message("Choose a location and analyte.")
 
+        self._update_publish_button()
+
         return [
             title,
             location,
             analyte,
             range_group,
-            save,
+            publish,
             *delete_controls,
             message,
         ]
@@ -1099,7 +1289,28 @@ class DashboardShell:
         pane.object = f'<p class="{css}">{html.escape(message)}</p>'
         pane.visible = True
 
-    def _on_settings_location_change(self, event: Any) -> None:
+    def _on_settings_title_change(self, event: Any, figure_id: str) -> None:
+        if self._suspend_settings:
+            return
+        self._set_draft_field(figure_id, title=(event.new or "").strip())
+
+    def _on_settings_range_change(self, event: Any, figure_id: str) -> None:
+        if self._suspend_settings or event.new not in RANGES:
+            return
+        self._set_draft_field(figure_id, refresh_chart=True, range=event.new)
+
+    def _on_settings_analyte_change(self, event: Any, figure_id: str) -> None:
+        if self._suspend_settings:
+            return
+        self._set_draft_field(
+            figure_id,
+            refresh_chart=True,
+            series_id=self._selected_id(event.new),
+        )
+
+    def _on_settings_location_change(self, event: Any, figure_id: str) -> None:
+        if self._suspend_settings:
+            return
         analyte = self.settings_analyte
         if analyte is None:
             return
@@ -1108,10 +1319,20 @@ class DashboardShell:
         try:
             rows = self._load_series(location_id)
         except ReadApiError as exc:
-            analyte.options = [("Choose an analyte", "")]
-            analyte.value = ""
+            self._suspend_settings = True
+            try:
+                analyte.options = [("Choose an analyte", "")]
+                analyte.value = ""
+            finally:
+                self._suspend_settings = False
             self._set_settings_message(
                 f"Could not load analytes: {exc.detail}", error=True
+            )
+            self._set_draft_field(
+                figure_id,
+                refresh_chart=True,
+                location_id=location_id,
+                series_id=None,
             )
             return
 
@@ -1120,68 +1341,234 @@ class DashboardShell:
             series_id = row.get("series_id")
             if isinstance(series_id, int) and not isinstance(series_id, bool):
                 options.append((self._series_label(row), str(series_id)))
-        analyte.options = options
-        analyte.value = current if current in [value for _, value in options] else ""
+        option_values = [value for _, value in options]
+        analyte_value = current if current in option_values else ""
+        self._suspend_settings = True
+        try:
+            analyte.options = options
+            analyte.value = analyte_value
+        finally:
+            self._suspend_settings = False
+
         if len(options) == 1:
             self._set_settings_message("No analytes are available for this location.")
         else:
             self._set_settings_message("")
-
-    def _on_save_figure(self, event: Any = None) -> None:
-        scene_id = self._selected_scene_id
-        figure_id = self._selected_figure_id
-        if scene_id is None or figure_id is None:
-            return
-
-        title = (self.settings_title.value if self.settings_title else "") or ""
-        title = title.strip()
-        location_id = self._selected_id(
-            self.settings_location.value if self.settings_location else None
+        self._set_draft_field(
+            figure_id,
+            refresh_chart=True,
+            location_id=location_id,
+            series_id=self._selected_id(analyte_value),
         )
-        series_id = self._selected_id(
-            self.settings_analyte.value if self.settings_analyte else None
-        )
-        range_value = self.settings_range.value if self.settings_range else DEFAULT_RANGE
 
-        if not title:
-            self._set_settings_message("Title must not be blank.", error=True)
-            return
+    def _validate_publish(self, effective: dict[str, Any]) -> str | None:
+        if not str(effective["title"]).strip():
+            return "Title must not be blank."
+        if effective["range"] not in RANGES:
+            return "Choose a range."
+        series_id = effective["series_id"]
         if series_id is None:
-            self._set_settings_message("Choose an analyte.", error=True)
+            return "Choose an analyte."
+        return self._validate_figure_selection(effective["location_id"], series_id)
+
+    def _on_publish_figure(self, event: Any = None) -> None:
+        self._publish_figure()
+
+    def _publish_figure(
+        self,
+        *,
+        force: bool = False,
+        scene_id: str | None = None,
+        figure_id: str | None = None,
+    ) -> None:
+        target_scene = scene_id if scene_id is not None else self._selected_scene_id
+        target_figure = (
+            figure_id if figure_id is not None else self._selected_figure_id
+        )
+        if target_scene is None or target_figure is None:
             return
-        if range_value not in RANGES:
-            self._set_settings_message("Choose a range.", error=True)
+        draft = self._drafts.get(target_figure)
+        if not draft:
             return
 
-        error = self._validate_figure_selection(location_id, series_id)
+        if force:
+            # Re-read the shared state so the retry validates against the
+            # values another session just published.
+            self._state = self.store.load()
+
+        scene = scenes.find_scene(self._state, target_scene)
+        stored = (
+            scenes.find_figure(scene, target_figure) if scene is not None else None
+        )
+        if stored is None:
+            self._drop_draft(target_figure)
+            self._set_status("This figure was deleted.", error=True)
+            self.refresh()
+            return
+
+        fields = dict(draft)
+        if "title" in fields:
+            fields["title"] = str(fields["title"]).strip()
+        effective = self._effective_figure(stored)
+
+        error = self._validate_publish(effective)
         if error is not None:
             self._set_settings_message(error, error=True)
             return
 
+        baseline = self._draft_baselines.get(
+            target_figure, self._settings_signature(stored)
+        )
+
         def operation(data: dict[str, Any]) -> dict[str, Any]:
+            scene_data = scenes.find_scene(data, target_scene)
+            figure = (
+                scenes.find_figure(scene_data, target_figure)
+                if scene_data is not None
+                else None
+            )
+            if figure is None:
+                raise scenes.FigureNotFound("figure not found")
+
+            if not force:
+                current = self._settings_signature(figure)
+                changed: list[str] = []
+                if "title" in fields and current[0] != baseline[0]:
+                    changed.append("title")
+                if "range" in fields and current[3] != baseline[3]:
+                    changed.append("range")
+                if (
+                    "location_id" in fields or "series_id" in fields
+                ) and current[1:3] != baseline[1:3]:
+                    changed.append("location or analyte")
+                if changed:
+                    raise PublishConflict(
+                        "This figure changed on the server ("
+                        + ", ".join(changed)
+                        + ")."
+                    )
+
+            updates: dict[str, Any] = {}
+            if "title" in fields:
+                updates["title"] = fields["title"]
+            if "range" in fields:
+                updates["range"] = fields["range"]
+            if "location_id" in fields or "series_id" in fields:
+                updates["location_id"] = (
+                    fields["location_id"]
+                    if "location_id" in fields
+                    else figure["location_id"]
+                )
+                updates["series_id"] = (
+                    fields["series_id"]
+                    if "series_id" in fields
+                    else figure["series_id"]
+                )
             return scenes.update_figure(
-                data,
-                scene_id,
-                figure_id,
-                title=title,
-                location_id=location_id,
-                series_id=series_id,
-                range=range_value,
+                data, target_scene, target_figure, **updates
             )
 
         try:
             self._state, figure = self.store.mutate(operation)
+        except PublishConflict as exc:
+            self._open_conflict_modal(target_scene, target_figure, str(exc))
+            return
+        except scenes.FigureNotFound:
+            self._drop_draft(target_figure)
+            self._state = self.store.load()
+            self._selected_scene_id = self._resolve_scene(target_scene)
+            self._selected_figure_id = None
+            self._set_status("This figure was deleted.", error=True)
+            self.refresh()
+            return
         except (scenes.SceneError, StateError) as exc:
             self._recover(str(exc))
             return
 
-        card = self._figure_cards.get(figure_id)
+        self._drop_draft(target_figure)
+        card = self._figure_cards.get(target_figure)
         if card is not None:
-            card.set_title(figure["title"])
             card.set_chart(self._render_chart(figure))
-        self._figure_delete_confirm_id = None
-        self._set_status("Saved")
-        self._fill_settings()
+        self._update_figure_indicators()
+        self._set_settings_message("")
+        self._set_status("Published")
+
+    # -- publish conflict modal --------------------------------------------
+
+    def _build_conflict_modal(self) -> pn.Modal:
+        self.conflict_message = pn.pane.HTML("", sizing_mode="stretch_width")
+        overwrite = pn.widgets.Button(
+            label="Overwrite",
+            color="primary",
+            sizing_mode="stretch_width",
+        )
+        overwrite.on_click(self._on_conflict_overwrite)
+        revert = pn.widgets.Button(
+            label="Revert to server state",
+            color="default",
+            sizing_mode="stretch_width",
+        )
+        revert.on_click(self._on_conflict_revert)
+        self.conflict_overwrite = overwrite
+        self.conflict_revert = revert
+        modal = pn.Modal(
+            pn.pane.HTML("<h3>Figure changed on the server</h3>"),
+            self.conflict_message,
+            pn.Row(overwrite, revert, sizing_mode="stretch_width"),
+            width=520,
+            show_close_button=True,
+            background_close=True,
+        )
+        modal.param.watch(self._on_conflict_close, "open")
+        return modal
+
+    def _open_conflict_modal(
+        self, scene_id: str, figure_id: str, message: str
+    ) -> None:
+        self._pending_publish = (scene_id, figure_id)
+        if self.conflict_message is not None:
+            self.conflict_message.object = (
+                f"<p>{html.escape(message)}</p>"
+                "<p>Overwrite your changes, or revert to the published figure?</p>"
+            )
+        if self.conflict_modal is not None:
+            self.conflict_modal.open = True
+
+    def _on_conflict_close(self, event: Any) -> None:
+        if not event.new:
+            self._pending_publish = None
+
+    def _on_conflict_overwrite(self, event: Any = None) -> None:
+        target = self._pending_publish
+        self._pending_publish = None
+        if self.conflict_modal is not None:
+            self.conflict_modal.open = False
+        if target is None:
+            return
+        scene_id, figure_id = target
+        self._publish_figure(force=True, scene_id=scene_id, figure_id=figure_id)
+
+    def _on_conflict_revert(self, event: Any = None) -> None:
+        target = self._pending_publish
+        self._pending_publish = None
+        if self.conflict_modal is not None:
+            self.conflict_modal.open = False
+        if target is None:
+            return
+        scene_id, figure_id = target
+        self._drop_draft(figure_id)
+        self._state = self.store.load()
+        self._selected_scene_id = self._resolve_scene(scene_id)
+        if self._selected_scene_id == scene_id:
+            scene = scenes.find_scene(self._state, scene_id)
+            found = (
+                scenes.find_figure(scene, figure_id) if scene is not None else None
+            )
+            self._selected_figure_id = figure_id if found is not None else None
+        else:
+            self._selected_figure_id = None
+        self._set_status("Reverted to the published figure.")
+        self.refresh()
 
     def _validate_figure_selection(
         self, location_id: int | None, series_id: int
@@ -1226,5 +1613,6 @@ class DashboardShell:
 
         self._selected_figure_id = None
         self._figure_delete_confirm_id = None
+        self._drop_draft(figure_id)
         self._clear_status()
         self.refresh()

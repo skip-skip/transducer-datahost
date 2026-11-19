@@ -747,13 +747,34 @@ def test_the_settings_card_shows_the_selected_figure(tmp_path) -> None:
     ]
     assert shell.settings_range is not None
     assert shell.settings_range.value == "7d"
-    assert shell.settings_save is not None
+    assert shell.settings_publish is not None
+    assert shell.settings_publish.label == "Published"
+    assert shell.settings_publish.disabled is True
+    assert shell.has_unpublished_changes(figure["id"]) is False
     assert shell.settings_delete is not None
     assert shell.settings_message is not None
     assert "Choose a location and analyte" in shell.settings_message.object
 
 
-def test_saving_the_settings_updates_the_figure_and_the_ribbon(tmp_path) -> None:
+def test_editing_a_figure_keeps_the_change_local_until_published(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+    original_title = figure["title"]
+
+    shell.settings_title.value = "Well level"
+
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == original_title
+    assert shell.has_unpublished_changes(figure["id"]) is True
+    assert shell.settings_publish.label == "Publish"
+    assert shell.settings_publish.disabled is False
+    assert shell.figure_cards[figure["id"]].ribbon.label == "Well level"
+    assert "figure-unpublished" in shell.figure_cards[figure["id"]].css_classes
+
+
+def test_publishing_updates_the_figure_and_the_ribbon(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
     figure = shell.create_figure(0, 0)
@@ -763,7 +784,7 @@ def test_saving_the_settings_updates_the_figure_and_the_ribbon(tmp_path) -> None
     shell.settings_location.value = "1"
     shell.settings_analyte.value = "10"
     shell.settings_range.value = "24h"
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
 
     stored = store.load()["scenes"][0]["figures"][0]
     assert stored["title"] == "Well level"
@@ -771,27 +792,117 @@ def test_saving_the_settings_updates_the_figure_and_the_ribbon(tmp_path) -> None
     assert stored["series_id"] == 10
     assert stored["range"] == "24h"
     assert shell.figure_cards[figure["id"]].ribbon.label == "Well level"
+    assert shell.has_unpublished_changes(figure["id"]) is False
+    assert shell.settings_publish.label == "Published"
+    assert shell.settings_publish.disabled is True
+    assert "figure-unpublished" not in shell.figure_cards[figure["id"]].css_classes
     assert shell.status_pane.visible is True
-    assert "Saved" in shell.status_pane.object
+    assert "Published" in shell.status_pane.object
 
 
-def test_saving_requires_an_analyte(tmp_path) -> None:
+def test_reverting_a_field_to_the_stored_value_clears_the_draft(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    shell.settings_title.value = "Changed"
+    assert shell.has_unpublished_changes(figure["id"]) is True
+
+    shell.settings_title.value = figure["title"]
+
+    assert shell.has_unpublished_changes(figure["id"]) is False
+    assert shell.settings_publish.label == "Published"
+    assert shell.settings_publish.disabled is True
+    assert "figure-unpublished" not in shell.figure_cards[figure["id"]].css_classes
+
+
+def test_unpublished_border_turns_orange_when_selected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+
+    shell.settings_title.value = "Second"
+    second_card = shell.figure_cards[second["id"]]
+    assert "figure-unpublished" in second_card.css_classes
+    assert "figure-selected" in second_card.css_classes
+
+    shell.select_figure(first["id"])
+
+    assert "figure-unpublished" in second_card.css_classes
+    assert "figure-selected" not in second_card.css_classes
+    assert "figure-unpublished" not in shell.figure_cards[first["id"]].css_classes
+
+
+def test_publishing_writes_only_the_changed_fields(tmp_path, monkeypatch) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+    shell.settings_location.value = "1"
+    shell.settings_analyte.value = "10"
+    shell.settings_publish.clicks += 1
+
+    calls: list[dict] = []
+    original = scenes.update_figure
+
+    def spy(data, scene_id, figure_id, **kwargs):
+        calls.append(kwargs)
+        return original(data, scene_id, figure_id, **kwargs)
+
+    monkeypatch.setattr(scenes, "update_figure", spy)
+    shell.settings_title.value = "Renamed"
+    shell.settings_publish.clicks += 1
+
+    assert calls == [{"title": "Renamed"}]
+
+
+def test_publishing_a_new_location_writes_the_analyte_pair(
+    tmp_path, monkeypatch
+) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+    shell.settings_location.value = "1"
+    shell.settings_analyte.value = "10"
+    shell.settings_publish.clicks += 1
+
+    calls: list[dict] = []
+    original = scenes.update_figure
+
+    def spy(data, scene_id, figure_id, **kwargs):
+        calls.append(kwargs)
+        return original(data, scene_id, figure_id, **kwargs)
+
+    monkeypatch.setattr(scenes, "update_figure", spy)
+    shell.settings_location.value = "2"
+    shell.settings_analyte.value = "12"
+    shell.settings_publish.clicks += 1
+
+    assert calls == [{"location_id": 2, "series_id": 12}]
+
+
+def test_publishing_requires_an_analyte(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
     figure = shell.create_figure(0, 0)
     assert figure is not None
 
     shell.settings_title.value = "Named but empty"
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
 
     assert shell.settings_message.visible is True
     assert "Choose an analyte" in shell.settings_message.object
     stored = store.load()["scenes"][0]["figures"][0]
     assert stored["title"] == figure["title"]
     assert stored["series_id"] is None
+    assert shell.has_unpublished_changes(figure["id"]) is True
+    assert shell.settings_publish.label == "Publish"
 
 
-def test_saving_rejects_a_blank_title(tmp_path) -> None:
+def test_publishing_rejects_a_blank_title(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
     figure = shell.create_figure(0, 0)
@@ -799,14 +910,15 @@ def test_saving_rejects_a_blank_title(tmp_path) -> None:
 
     shell.settings_title.value = "   "
     shell.settings_analyte.value = "10"
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
 
     assert "Title must not be blank" in shell.settings_message.object
     stored = store.load()["scenes"][0]["figures"][0]
     assert stored["title"] == figure["title"]
+    assert shell.has_unpublished_changes(figure["id"]) is True
 
 
-def test_saving_rejects_an_analyte_without_readings_at_the_location(
+def test_publishing_rejects_an_analyte_without_readings_at_the_location(
     tmp_path, monkeypatch
 ) -> None:
     shell, store = make_shell(tmp_path)
@@ -819,11 +931,12 @@ def test_saving_rejects_an_analyte_without_readings_at_the_location(
     monkeypatch.setattr(
         shell.client, "series_at_location", lambda *args, **kwargs: []
     )
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
 
     assert "no readings at this location" in shell.settings_message.object
     stored = store.load()["scenes"][0]["figures"][0]
     assert stored["series_id"] is None
+    assert shell.has_unpublished_changes(figure["id"]) is True
 
 
 def test_changing_the_location_refreshes_the_analyte_options(tmp_path) -> None:
@@ -887,16 +1000,16 @@ def test_a_failed_location_load_is_reported_in_the_settings_card(
     assert "Could not load locations" in shell.settings_message.object
 
 
-def test_saving_a_selection_renders_a_bokeh_chart(tmp_path) -> None:
-    shell, _ = make_shell(tmp_path)
+def test_a_draft_selection_renders_a_bokeh_chart(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
     shell.create_scene()
     figure = shell.create_figure(0, 0)
     assert figure is not None
 
     shell.settings_analyte.value = "10"
-    shell.settings_save.clicks += 1
 
     assert isinstance(shell.figure_cards[figure["id"]].chart, pn.pane.Bokeh)
+    assert store.load()["scenes"][0]["figures"][0]["series_id"] is None
 
 
 @pytest.mark.parametrize(
@@ -918,15 +1031,15 @@ def test_a_chart_requests_the_configured_window_and_point_cap(
     shell.settings_analyte.value = "10"
     shell.settings_location.value = "1"
     shell.settings_range.value = range_key
-    shell.settings_save.clicks += 1
 
-    assert len(calls) == 1
-    assert calls[0]["series_id"] == 10
-    assert calls[0]["points"] == 2000
-    assert calls[0]["tz"] == "local"
-    assert calls[0]["location_id"] == 1
-    span = datetime.fromisoformat(calls[0]["end"]) - datetime.fromisoformat(
-        calls[0]["start"]
+    assert calls
+    last = calls[-1]
+    assert last["series_id"] == 10
+    assert last["points"] == 2000
+    assert last["tz"] == "local"
+    assert last["location_id"] == 1
+    span = datetime.fromisoformat(last["end"]) - datetime.fromisoformat(
+        last["start"]
     )
     assert span.total_seconds() == hours * 3600
 
@@ -939,7 +1052,6 @@ def test_a_figure_without_data_shows_an_inline_message(tmp_path, monkeypatch) ->
 
     monkeypatch.setattr(shell.client, "points", lambda *args, **kwargs: [])
     shell.settings_analyte.value = "10"
-    shell.settings_save.clicks += 1
 
     chart = shell.figure_cards[figure["id"]].chart
     assert isinstance(chart, pn.pane.HTML)
@@ -957,7 +1069,6 @@ def test_a_failed_chart_load_does_not_break_the_scene(tmp_path, monkeypatch) -> 
 
     monkeypatch.setattr(shell.client, "points", fail)
     shell.settings_analyte.value = "10"
-    shell.settings_save.clicks += 1
 
     chart = shell.figure_cards[figure["id"]].chart
     assert isinstance(chart, pn.pane.HTML)
@@ -976,10 +1087,10 @@ def test_opening_a_scene_loads_a_chart_for_every_figure(tmp_path) -> None:
 
     shell.select_figure(first["id"])
     shell.settings_analyte.value = "10"
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
     shell.select_figure(second["id"])
     shell.settings_analyte.value = "11"
-    shell.settings_save.clicks += 1
+    shell.settings_publish.clicks += 1
 
     shell.refresh()
 
@@ -1011,3 +1122,199 @@ def test_new_figures_use_the_configured_default_range(
 
     assert figure is not None
     assert figure["range"] == expected
+
+
+def configure_and_publish(
+    shell: DashboardShell,
+    *,
+    title: str = "Figure",
+    location: str = "1",
+    analyte: str = "10",
+    range_key: str = "7d",
+) -> None:
+    shell.settings_title.value = title
+    shell.settings_location.value = location
+    shell.settings_analyte.value = analyte
+    shell.settings_range.value = range_key
+    shell.settings_publish.clicks += 1
+
+
+def test_a_layout_change_does_not_create_a_draft(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+
+    card_id = str(id(shell.figure_cards[figure["id"]]))
+    shell.apply_grid_state([{"id": card_id, "x0": 3, "y0": 0, "x1": 6, "y1": 2}])
+
+    assert shell.has_unpublished_changes(figure["id"]) is False
+    assert shell.settings_publish.label == "Published"
+    assert shell.settings_publish.disabled is True
+    assert store.load()["scenes"][0]["figures"][0]["layout"]["x"] == 3
+
+
+def test_drafts_survive_a_scene_switch(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    first_scene = shell.create_scene(name="First")
+    figure = shell.create_figure(0, 0)
+    assert first_scene is not None
+    assert figure is not None
+    shell.settings_title.value = "Draft title"
+
+    shell.create_scene(name="Second")
+    shell.select_scene(first_scene["id"])
+    shell.select_figure(figure["id"])
+
+    assert shell.has_unpublished_changes(figure["id"]) is True
+    assert shell.settings_title.value == "Draft title"
+    assert shell.settings_publish.label == "Publish"
+    assert "figure-unpublished" in shell.figure_cards[figure["id"]].css_classes
+
+
+def test_a_new_session_does_not_inherit_drafts(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path, label="alice")
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+    shell.settings_title.value = "Draft title"
+
+    reloaded, _ = make_shell(tmp_path, label="alice")
+
+    assert reloaded.has_unpublished_changes(figure["id"]) is False
+    assert reloaded.figure_cards[figure["id"]].ribbon.label == figure["title"]
+    reloaded.select_figure(figure["id"])
+    assert reloaded.settings_publish.label == "Published"
+    assert "figure-unpublished" not in reloaded.figure_cards[figure["id"]].css_classes
+
+
+def test_deleting_a_figure_drops_its_draft(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert figure is not None
+    shell.settings_title.value = "Draft"
+
+    shell.settings_delete.clicks += 1
+    shell.settings_confirm_delete.clicks += 1
+
+    assert shell.has_unpublished_changes(figure["id"]) is False
+    assert store.load()["scenes"][0]["figures"] == []
+
+
+def test_a_conflicting_publish_opens_the_modal_and_writes_nothing(tmp_path) -> None:
+    shell_a, store = make_shell(tmp_path, label="alice")
+    shell_a.create_scene()
+    figure = shell_a.create_figure(0, 0)
+    assert figure is not None
+    configure_and_publish(shell_a, title="Original")
+
+    shell_a.settings_title.value = "From Alice"
+
+    shell_b, _ = make_shell(tmp_path, label="bob")
+    shell_b.select_figure(figure["id"])
+    shell_b.settings_title.value = "From Bob"
+    shell_b.settings_publish.clicks += 1
+
+    shell_a.settings_publish.clicks += 1
+
+    assert shell_a.conflict_modal is not None
+    assert shell_a.conflict_modal.open is True
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == "From Bob"
+    assert shell_a.has_unpublished_changes(figure["id"]) is True
+    assert shell_a.settings_publish.label == "Publish"
+
+
+def test_overwriting_a_conflict_publishes_the_draft(tmp_path) -> None:
+    shell_a, store = make_shell(tmp_path, label="alice")
+    shell_a.create_scene()
+    figure = shell_a.create_figure(0, 0)
+    assert figure is not None
+    configure_and_publish(shell_a, title="Original")
+
+    shell_a.settings_title.value = "From Alice"
+
+    shell_b, _ = make_shell(tmp_path, label="bob")
+    shell_b.select_figure(figure["id"])
+    shell_b.settings_title.value = "From Bob"
+    shell_b.settings_publish.clicks += 1
+
+    shell_a.settings_publish.clicks += 1
+    assert shell_a.conflict_overwrite is not None
+    shell_a.conflict_overwrite.clicks += 1
+
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == "From Alice"
+    assert shell_a.conflict_modal.open is False
+    assert shell_a.has_unpublished_changes(figure["id"]) is False
+    assert shell_a.settings_publish.label == "Published"
+
+
+def test_reverting_a_conflict_restores_the_server_figure(tmp_path) -> None:
+    shell_a, store = make_shell(tmp_path, label="alice")
+    shell_a.create_scene()
+    figure = shell_a.create_figure(0, 0)
+    assert figure is not None
+    configure_and_publish(shell_a, title="Original")
+
+    shell_a.settings_title.value = "From Alice"
+
+    shell_b, _ = make_shell(tmp_path, label="bob")
+    shell_b.select_figure(figure["id"])
+    shell_b.settings_title.value = "From Bob"
+    shell_b.settings_publish.clicks += 1
+
+    shell_a.settings_publish.clicks += 1
+    assert shell_a.conflict_revert is not None
+    shell_a.conflict_revert.clicks += 1
+
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == "From Bob"
+    assert shell_a.conflict_modal.open is False
+    assert shell_a.has_unpublished_changes(figure["id"]) is False
+    assert shell_a.settings_title.value == "From Bob"
+    assert shell_a.figure_cards[figure["id"]].ribbon.label == "From Bob"
+
+
+def test_a_non_overlapping_server_change_does_not_conflict(tmp_path) -> None:
+    shell_a, store = make_shell(tmp_path, label="alice")
+    shell_a.create_scene()
+    figure = shell_a.create_figure(0, 0)
+    assert figure is not None
+    configure_and_publish(shell_a, title="Original")
+
+    shell_a.settings_title.value = "From Alice"
+
+    shell_b, _ = make_shell(tmp_path, label="bob")
+    shell_b.select_figure(figure["id"])
+    shell_b.settings_range.value = "24h"
+    shell_b.settings_publish.clicks += 1
+
+    shell_a.settings_publish.clicks += 1
+
+    stored = store.load()["scenes"][0]["figures"][0]
+    assert stored["title"] == "From Alice"
+    assert stored["range"] == "24h"
+    assert shell_a.conflict_modal.open is False
+    assert shell_a.has_unpublished_changes(figure["id"]) is False
+
+
+def test_publishing_a_remotely_deleted_figure_reports_it(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    scene = shell.create_scene()
+    figure = shell.create_figure(0, 0)
+    assert scene is not None
+    assert figure is not None
+    configure_and_publish(shell, title="Original")
+    shell.settings_title.value = "Draft"
+
+    store.mutate(
+        lambda data: scenes.delete_figure(data, scene["id"], figure["id"])
+    )
+    shell.settings_publish.clicks += 1
+
+    assert shell.conflict_modal.open is False
+    assert shell.status_pane.visible is True
+    assert "deleted" in shell.status_pane.object.lower()
+    assert shell.has_unpublished_changes(figure["id"]) is False

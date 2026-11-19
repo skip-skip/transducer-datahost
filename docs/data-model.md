@@ -279,6 +279,10 @@ service:
 - `ui[<read-token label>]`: selected scene, selected figure, and scenes drawer collapse
   state (stored as `scenes_tray_collapsed`).
 
+Unpublished figure edits are not part of the document. They live in the browser session
+as a per-figure draft and are discarded on reload; publishing writes the changed figure
+fields back to the shared scene.
+
 Figures bind to `transducer.series.series_id` and `transducer.location.location_id` by
 value only; there is no foreign key because the dashboard has no database connection.
 The UI derives Location and Analyte labels from `/api/locations` and

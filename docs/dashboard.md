@@ -146,8 +146,8 @@ Rules:
 - `range` is one of `24h`, `7d`, `30d`. New figures start at the range implied
   by `DASHBOARD_DEFAULT_WINDOW_DAYS`.
 - The selected scene, selected figure, and scenes drawer collapse state are stored
-  per token label under `ui`. The settings drawer collapse state is session-only
-  and is not persisted.
+  per token label under `ui`. The settings drawer collapse state and unpublished
+  figure drafts are session-only and are not persisted.
 - Figure and scene IDs are UUIDs because there is no database identity column.
 
 A version 1 state file (personal/shared figures) is archived to
@@ -167,7 +167,10 @@ Write safety:
   then `os.replace` the temporary file into place.
 - Validate the document on load and before every write. A corrupt file stops the
   service with a clear error instead of silently discarding state.
-- One uvicorn worker; concurrent edits are last-write-wins.
+- One uvicorn worker. A publish writes only the settings the user changed. If
+  another session changed one of those settings after the draft started, the
+  publish is rejected with a conflict modal instead of silently overwriting it;
+  changes to settings the draft does not touch are merged.
 - Directory mode `0700`, file mode `0600`.
 
 ## 4. UI
@@ -200,8 +203,16 @@ Figure settings drawer:
   `GET /locations/{id}/series`, or `GET /series` for an un-scoped figure. Option
   labels include the logger serial because a location can host more than one
   instrument over time.
-- `Save` rejects a blank title, a missing analyte, a series that does not exist,
-  and a location/series pair with no readings together.
+- Edits are held in a session-local draft. The form and that figure's chart show
+  the draft immediately, and the figure card gets a yellow border (orange while
+  selected) to mark it unpublished. The button reads `Publish` and is enabled
+  while changes exist; it reads `Published` and is disabled when the figure
+  matches the shared state. Reloading the page discards drafts.
+- `Publish` writes only the changed settings and rejects a blank title, a missing
+  analyte, a series that does not exist, and a location/series pair with no
+  readings together. If another session changed the same settings after the
+  draft started, a modal offers **Overwrite** or **Revert to server state**;
+  closing it keeps the draft.
 - `Delete figure` takes two clicks (delete, then confirm).
 - Its collapse state is per browser session and resets on reload. Selecting or
   creating a figure updates the drawer contents without changing its open state;
@@ -375,9 +386,9 @@ Automated coverage in `dashboard/tests`:
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `181 passed`; `ruff check dashboard` and
+Latest local run: `198 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
-grid layout persistence, the empty-cell bridge, settings save/reload, and
+grid layout persistence, the empty-cell bridge, settings publish/reload, and
 Bokeh chart rendering into a document.
 
 Manual browser checklist:
@@ -390,16 +401,25 @@ Manual browser checklist:
 5. Collapse each drawer independently. The scenes drawer stays collapsed after a
    reload; the settings drawer resets to open.
 6. Drag and resize a figure; the layout survives a reload and a restart.
-7. Set title, location, analyte, and range; the chart renders for 24h/7d/30d.
-8. Delete a figure; the scene updates and the selection clears.
-9. Log in with a second token; the same scenes are visible.
-10. Confirm no `POSTGRES_*` variables in the dashboard container.
-11. Confirm no external network requests in the browser network log. The
+7. Set title, location, analyte, and range without publishing; the figure card
+   gets a yellow border (orange while selected), the chart previews the draft,
+   and the button reads `Publish`. Reload; the draft is gone and the card is
+   unmarked.
+8. Publish; the button changes to `Published`, the border clears, the chart
+   renders for 24h/7d/30d, and the change survives a reload.
+9. In a second session, edit the same setting and publish, then publish the first
+   session's draft; the conflict modal appears. Overwrite keeps the first
+   session's value; Revert restores the second session's value.
+10. Delete a figure; the scene updates, the selection clears, and any draft for
+    it is dropped.
+11. Log in with a second token; the same scenes are visible.
+12. Confirm no `POSTGRES_*` variables in the dashboard container.
+13. Confirm no external network requests in the browser network log. The
     `cdn.jsdelivr.net/*.map` messages that appear with devtools open are blocked
     source-map fetches from local bundle comments, not code loads.
-12. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
+14. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
     `/login` still returns the strict CSP without `'unsafe-eval'`.
-13. Test backup and restore of the volume.
+15. Test backup and restore of the volume.
 
 ## 9. Boundaries
 
