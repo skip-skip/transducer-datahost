@@ -211,11 +211,18 @@ State remains one JSON file on the `dashboard_state` volume.
 ### Grid constants
 
 - 12 columns.
+- 6 rows.
 - 220 px row height.
 - Minimum figure size: 1 cell (1 column x 1 row).
 
-These are module constants for the MVP. Per-scene grid configuration is a
-follow-up.
+These are module constants for the MVP. The grid is a single static size: it
+never grows when figures are created and only scales in width with the browser.
+Per-scene grid configuration is a follow-up.
+
+A version 2 document written while the grid still grew with its figures may
+contain layouts below row 6. On load, those figures are pulled up into the fixed
+canvas (and shrunk only if taller than the whole grid), and the normalized
+document is written back. Other invalid layouts are still rejected.
 
 ### Version 1 state
 
@@ -343,11 +350,12 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 - publish the measured cell width and height as CSS variables for the grid
   background.
 
-The grid is given an explicit `height` of `nrows * GRID_ROW_HEIGHT` and
-`stretch_width` sizing. `SceneGrid` derives its cell height from that explicit
-height, so the cell size stays correct even when the canvas is rebuilt in place
-and the new element has not been laid out yet. Panel also sizes each figure card
-from the same explicit height.
+The grid is fixed at `GRID_ROWS` rows (6) and `GRID_ROWS * GRID_ROW_HEIGHT`
+tall, with `stretch_width` sizing. Only its width follows the browser; creating
+figures never changes the row count, height, or card density. `SceneGrid` derives
+its cell height from that explicit height, so the cell size stays correct even
+when the canvas is rebuilt in place and the new element has not been laid out
+yet. Panel also sizes each figure card from the same explicit height.
 
 The grid canvas is light gray (`#f7f8fa`) with 1 px cell lines (`#e2e6ec`).
 The rule targets the inner `.grid-stack` element and sizes the background with
@@ -418,14 +426,18 @@ Hovering without pressing shows a one-cell preview.
 `DashboardShell._refresh_after_create` avoids a full-shell `refresh()` when a
 figure is created:
 
-- If the new figure fits in the existing grid rows, `_append_figure_card` places
-  the card directly in the live `SceneGrid`, records it in `_figure_cards` and
-  `_grid_figure_ids`, and leaves every existing card untouched.
+- `_append_figure_card` places the card directly in the live `SceneGrid`,
+  records it in `_figure_cards` and `_grid_figure_ids`, and leaves every
+  existing card untouched.
 - The header is re-rendered for the new figure count, the selection and settings
   drawer are updated, and only the new figure's chart is loaded.
-- If the new figure needs more rows, `_rebuild_canvas` replaces only the canvas
-  row and the header. The scene/settings rail is preserved rather than rebuilt.
-- A full `refresh()` remains the fallback if the view structure is unexpected.
+- The grid keeps the same row count and height, so creating a figure never
+  changes the canvas geometry or the card density. Scene operations reject
+  layouts that would extend past the fixed grid and fall back to the first free
+  slot when a requested cell does not fit.
+- A canvas-only `_rebuild_canvas` remains the fallback when no live grid can
+  accept the card, and a full `refresh()` remains the fallback if the view
+  structure is unexpected.
 
 The targeted path is what makes the pending placeholder hand off to the real
 card quickly: the grid is not torn down, so the placeholder is replaced in place
@@ -553,7 +565,8 @@ Manual browser checklist:
 4. A plain click on an empty cell creates a 1 x 1 figure. Hover to see the
    one-cell preview, then drag to paint a larger footprint and release. The
    figure appears with exactly that span. Painting stops at an existing figure,
-   and a drag that starts on a figure moves or selects it instead.
+   and a drag that starts on a figure moves or selects it instead. The grid
+   keeps the same size and card density before and after the figure appears.
 5. Click **Lock**: figures no longer move, resize, or respond to selection, and
    painting is unavailable. Click **Unlock** to edit again. Reload; the canvas
    starts unlocked.

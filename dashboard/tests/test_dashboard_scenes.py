@@ -5,6 +5,7 @@ from transducer_dashboard.state import (
     DEFAULT_FIGURE_HEIGHT,
     DEFAULT_FIGURE_WIDTH,
     GRID_COLUMNS,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
     StateStore,
@@ -150,6 +151,30 @@ def test_add_figure_rejects_invalid_cells(x: int, y: int) -> None:
         scenes.add_figure(state, scene["id"], x, y)
 
 
+def test_add_figure_falls_back_when_the_cell_is_below_the_fixed_grid() -> None:
+    state = default_state()
+    scene = make_scene(state)
+
+    figure = scenes.add_figure(state, scene["id"], 0, GRID_ROWS - 1)
+
+    assert figure["layout"] == {"x": 0, "y": 0, "w": 3, "h": 2}
+    validate_state(state)
+
+
+def test_the_fixed_grid_fills_up_without_growing() -> None:
+    state = default_state()
+    scene = make_scene(state)
+    for y in range(0, GRID_ROWS, DEFAULT_FIGURE_HEIGHT):
+        for x in range(0, GRID_COLUMNS, DEFAULT_FIGURE_WIDTH):
+            scenes.add_figure(state, scene["id"], x, y)
+
+    with pytest.raises(scenes.SceneFull):
+        scenes.add_figure(state, scene["id"], 0, 0)
+
+    assert len(scene["figures"]) == 12
+    validate_state(state)
+
+
 def test_add_figure_to_an_unknown_scene_raises() -> None:
     state = default_state()
 
@@ -198,6 +223,8 @@ def test_add_figure_at_does_not_fall_back_to_a_free_slot() -> None:
         (0, 0, MIN_FIGURE_WIDTH - 1, 2),
         (0, 0, 3, MIN_FIGURE_HEIGHT - 1),
         (GRID_COLUMNS - 2, 0, 3, 2),
+        (0, GRID_ROWS - 1, 3, 2),
+        (0, GRID_ROWS, 1, 1),
     ],
 )
 def test_add_figure_at_rejects_invalid_spans(
@@ -221,6 +248,20 @@ def test_find_free_slot_rejects_impossible_sizes() -> None:
     assert scenes.find_free_slot([], width=GRID_COLUMNS + 1) is None
     assert scenes.find_free_slot([], width=MIN_FIGURE_WIDTH - 1) is None
     assert scenes.find_free_slot([], height=MIN_FIGURE_HEIGHT - 1) is None
+    assert scenes.find_free_slot([], height=GRID_ROWS + 1) is None
+
+
+def test_update_layout_rejects_a_figure_below_the_fixed_grid() -> None:
+    state = default_state()
+    scene = make_scene(state)
+    figure = scenes.add_figure(state, scene["id"], 0, 0)
+
+    with pytest.raises(scenes.SceneError, match="rows"):
+        scenes.update_layout(
+            state,
+            scene["id"],
+            {figure["id"]: {"x": 0, "y": GRID_ROWS - 1, "w": 3, "h": 2}},
+        )
 
 
 def test_update_figure_changes_fields_and_preserves_unset_values() -> None:

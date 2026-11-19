@@ -10,11 +10,11 @@ from transducer_dashboard.grid import (
     SceneGrid,
     chart_placeholder,
     grid_height,
-    grid_rows,
 )
 from transducer_dashboard.state import (
     GRID_COLUMNS,
     GRID_ROW_HEIGHT,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
 )
@@ -31,18 +31,13 @@ def make_figure(figure_id: str = "fig", title: str = "Untitled figure"):
     }
 
 
-def test_grid_rows_adds_working_room_below_the_figures() -> None:
-    assert grid_rows([]) == 6
-
-    figures = [make_figure()]
-    assert grid_rows(figures) == 6
-
-    figures[0]["layout"]["y"] = 8
-    assert grid_rows(figures) == 13
+def test_the_grid_is_a_fixed_number_of_rows() -> None:
+    assert GRID_ROWS == 6
 
 
 def test_grid_height_uses_the_configured_row_height() -> None:
-    assert grid_height(6) == 6 * GRID_ROW_HEIGHT
+    assert grid_height(GRID_ROWS) == GRID_ROWS * GRID_ROW_HEIGHT
+    assert grid_height() == GRID_ROWS * GRID_ROW_HEIGHT
 
 
 def test_the_grid_background_tracks_the_cell_size() -> None:

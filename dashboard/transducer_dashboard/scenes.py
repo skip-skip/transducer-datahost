@@ -16,6 +16,7 @@ from .state import (
     DEFAULT_FIGURE_WIDTH,
     DEFAULT_RANGE,
     GRID_COLUMNS,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
     RANGES,
@@ -172,11 +173,9 @@ def find_free_slot(
 
     if width > GRID_COLUMNS or width < MIN_FIGURE_WIDTH or height < MIN_FIGURE_HEIGHT:
         return None
-    lowest = max(
-        (figure["layout"]["y"] + figure["layout"]["h"] for figure in figures),
-        default=0,
-    )
-    for y in range(0, lowest + 1):
+    if height > GRID_ROWS:
+        return None
+    for y in range(0, GRID_ROWS - height + 1):
         for x in range(0, GRID_COLUMNS - width + 1):
             if _cell_is_free(figures, x, y, width, height):
                 return x, y
@@ -206,7 +205,11 @@ def add_figure(
     figures = scene.setdefault("figures", [])
     width = DEFAULT_FIGURE_WIDTH
     height = DEFAULT_FIGURE_HEIGHT
-    if x + width > GRID_COLUMNS or not _cell_is_free(figures, x, y, width, height):
+    if (
+        x + width > GRID_COLUMNS
+        or y + height > GRID_ROWS
+        or not _cell_is_free(figures, x, y, width, height)
+    ):
         slot = find_free_slot(figures, width, height)
         if slot is None:
             raise SceneFull("the scene has no room for another figure")
@@ -240,6 +243,8 @@ def add_figure_at(
         raise SceneError(f"h must be at least {MIN_FIGURE_HEIGHT}")
     if x + width > GRID_COLUMNS:
         raise SceneError(f"x + w must not exceed {GRID_COLUMNS}")
+    if y + height > GRID_ROWS:
+        raise SceneError(f"y + h must not exceed {GRID_ROWS}")
 
     figures = scene.setdefault("figures", [])
     if not _cell_is_free(figures, x, y, width, height):

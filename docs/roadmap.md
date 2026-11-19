@@ -227,13 +227,14 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Left ribbon rail with full-height vertical tabs stacked left-to-right; the scenes
   drawer is leftmost and opens to the right, pushing the settings drawer and the canvas.
   It lists all shared scenes, with create and confirmed delete.
-- [x] Gridded scene canvas (12 columns, 220 px rows) with a one-cell minimum figure size
-  and a bottom-right lock toggle. While unlocked, figures move and resize, and painting a
-  free footprint creates a figure with that span (a plain click makes a 1 x 1 figure).
-  Lock freezes moving, resizing, painting, and selection. The lock is session-local and
-  resets to unlocked on reload. The painted cells show a card-shaped “Creating figure…”
-  placeholder until the backend answers, and a targeted refresh appends the new card
-  without rebuilding the shell.
+- [x] Gridded scene canvas (fixed 12 columns and 6 rows, 220 px rows) with a one-cell
+  minimum figure size and a bottom-right lock toggle. The grid only scales in width with
+  the browser and never changes size when figures are created. While unlocked, figures
+  move and resize, and painting a free footprint creates a figure with that span (a plain
+  click makes a 1 x 1 figure). Lock freezes moving, resizing, painting, and selection.
+  The lock is session-local and resets to unlocked on reload. The painted cells show a
+  card-shaped “Creating figure…” placeholder until the backend answers, and a targeted
+  refresh appends the new card without rebuilding the shell.
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:

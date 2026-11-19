@@ -226,7 +226,9 @@ Figure settings drawer:
 
 Scene canvas (right of the drawers):
 
-- A 12-column grid with 220 px rows; the smallest figure is a single cell.
+- A fixed 12-column, 6-row grid with 220 px rows; the smallest figure is a
+  single cell. The grid scales in width with the browser but never changes its
+  row count, height, or card density when figures are created.
 - The canvas is light gray with 1 px grid lines on the cell boundaries, so
   empty cells read as a working grid behind the white figure cards.
 - A **Lock** / **Unlock** button fixed to the bottom-right overlays the canvas.
@@ -246,6 +248,8 @@ Scene canvas (right of the drawers):
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
   to resize. Layouts persist immediately and survive reloads and restarts.
+  Figures stay inside the fixed canvas; when it fills up, creating another
+  figure reports that the scene has no room instead of growing the grid.
 
 Charts:
 
@@ -406,7 +410,7 @@ Automated coverage in `dashboard/tests`:
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `225 passed`; `ruff check dashboard` and
+Latest local run: `244 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
 grid layout persistence, the lock toggle, the paint bridge, settings
 publish/reload, and Bokeh chart rendering into a document.
@@ -421,7 +425,9 @@ Manual browser checklist:
    one-cell preview, then drag to paint a larger footprint and release; the
    painted cells instantly show a “Creating figure…” card that is replaced by
    the real figure with that exact span, selected. Painting stops at an existing
-   figure, and a drag that starts on a figure moves or selects it.
+   figure, and a drag that starts on a figure moves or selects it. The grid
+   keeps the same size, row count, and card density before and after the figure
+   appears.
 5. Click Lock; figures no longer move, resize, or respond to selection, and
    painting is unavailable. Click Unlock to edit again. Reload; the canvas
    starts unlocked.

@@ -10,7 +10,12 @@ from transducer_dashboard.auth import Session
 from transducer_dashboard.grid import GRID_BACKGROUND
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
-from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
+from transducer_dashboard.state import (
+    GRID_COLUMNS,
+    GRID_ROW_HEIGHT,
+    GRID_ROWS,
+    StateStore,
+)
 from transducer_dashboard.workspace import (
     DRAWER_CSS,
     DRAWER_TITLE_CSS,
@@ -707,7 +712,7 @@ def test_a_new_figure_loads_only_its_own_chart(tmp_path, monkeypatch) -> None:
     assert loaded == [second["id"]]
 
 
-def test_a_figure_that_needs_more_rows_rebuilds_only_the_canvas(tmp_path) -> None:
+def test_creating_a_figure_never_resizes_the_grid(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
     shell.create_figure(0, 0)
@@ -719,10 +724,13 @@ def test_a_figure_that_needs_more_rows_rebuilds_only_the_canvas(tmp_path) -> Non
     second = shell.create_figure(0, 5)
 
     assert second is not None
-    assert shell.grid is not grid
-    assert shell.grid.nrows == 10
-    assert shell.grid.height == 10 * GRID_ROW_HEIGHT
-    assert shell.grid.sizing_mode == "stretch_width"
+    # Row 5 cannot hold the default two-row figure, so it lands in the first
+    # free slot instead of growing the grid.
+    assert second["layout"] == {"x": 3, "y": 0, "w": 3, "h": 2}
+    assert shell.grid is grid
+    assert shell.grid.nrows == GRID_ROWS
+    assert shell.grid.height == GRID_ROWS * GRID_ROW_HEIGHT
+    assert shell.canvas_body.height == GRID_ROWS * GRID_ROW_HEIGHT
     assert shell.rail is rail
     assert shell.tray_card is tray
     assert second["id"] in shell.figure_cards

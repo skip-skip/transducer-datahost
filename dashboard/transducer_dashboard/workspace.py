@@ -33,13 +33,13 @@ from .grid import (
     SceneGrid,
     chart_placeholder,
     grid_height,
-    grid_rows,
 )
 from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings
 from .state import (
     DEFAULT_RANGE,
     GRID_COLUMNS,
+    GRID_ROWS,
     RANGES,
     StateError,
     StateStore,
@@ -638,14 +638,12 @@ class DashboardShell:
         self._schedule_figure_chart_load(figure["id"])
 
     def _append_figure_card(self, figure: dict[str, Any]) -> bool:
-        """Add the card to the live grid when the existing rows can hold it."""
+        """Add the card to the live grid without rebuilding it."""
 
         if self._grid is None or self._selected_scene_id is None:
             return False
         scene = scenes.find_scene(self._state, self._selected_scene_id)
         if scene is None:
-            return False
-        if grid_rows(scene["figures"]) > int(self._grid.nrows or 0):
             return False
         display = dict(self._effective_figure(figure))
         display["title"] = self._figure_title(display)
@@ -663,7 +661,7 @@ class DashboardShell:
         return True
 
     def _rebuild_canvas(self) -> None:
-        """Fall back to a canvas-only rebuild when the grid needs more rows."""
+        """Fall back to a canvas-only rebuild when no live grid can be used."""
 
         objects = list(self._view.objects)
         if len(objects) < 2 or not isinstance(objects[1], pn.Row):
@@ -1149,7 +1147,7 @@ class DashboardShell:
 
     def _render_grid(self, scene: dict[str, Any]) -> pn.Column:
         figures = scene["figures"]
-        rows = grid_rows(figures)
+        rows = GRID_ROWS
         grid = SceneGrid(
             ncols=GRID_COLUMNS,
             nrows=rows,

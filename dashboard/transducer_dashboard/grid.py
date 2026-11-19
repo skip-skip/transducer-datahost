@@ -21,10 +21,13 @@ from typing import Any
 import panel as pn
 import param
 
-from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_WIDTH
-
-GRID_MIN_ROWS = 6
-GRID_EXTRA_ROWS = 3
+from .state import (
+    GRID_COLUMNS,
+    GRID_ROW_HEIGHT,
+    GRID_ROWS,
+    MIN_FIGURE_HEIGHT,
+    MIN_FIGURE_WIDTH,
+)
 
 GRID_BACKGROUND = "#f7f8fa"
 GRID_LINE = "#e2e6ec"
@@ -607,17 +610,7 @@ class SceneGrid(pn.layout.GridStack):
             handler(x, y, width, height)
 
 
-def grid_rows(figures: list[dict[str, Any]]) -> int:
-    """Return the row count needed for the figures plus empty working room."""
-
-    lowest = max(
-        (figure["layout"]["y"] + figure["layout"]["h"] for figure in figures),
-        default=0,
-    )
-    return max(GRID_MIN_ROWS, lowest + GRID_EXTRA_ROWS)
-
-
-def grid_height(rows: int) -> int:
+def grid_height(rows: int = GRID_ROWS) -> int:
     return rows * GRID_ROW_HEIGHT
 
 
@@ -626,13 +619,11 @@ __all__ = [
     "GRID_BACKGROUND",
     "GRID_COLUMNS",
     "GRID_CSS",
-    "GRID_EXTRA_ROWS",
     "GRID_LINE",
-    "GRID_MIN_ROWS",
+    "GRID_ROWS",
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",
     "SceneGrid",
     "chart_placeholder",
     "grid_height",
-    "grid_rows",
 ]
