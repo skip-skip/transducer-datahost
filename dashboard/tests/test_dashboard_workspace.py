@@ -1,5 +1,6 @@
 import json
 from datetime import datetime
+from typing import Any
 
 import panel as pn
 import pytest
@@ -724,7 +725,7 @@ def test_switching_scenes_rebuilds_the_grid(tmp_path) -> None:
 
 
 def option_values(select) -> list:
-    return [value for _, value in select.options]
+    return list(select.options.values())
 
 
 def test_the_settings_card_shows_the_selected_figure(tmp_path) -> None:
@@ -736,15 +737,13 @@ def test_the_settings_card_shows_the_selected_figure(tmp_path) -> None:
     assert shell.settings_title is not None
     assert shell.settings_title.value == figure["title"]
     assert shell.settings_location is not None
-    assert shell.settings_location.options[0] == ("All locations", "")
-    assert ("MCMW-04", "1") in shell.settings_location.options
+    assert shell.settings_location.options["All locations"] == ""
+    assert shell.settings_location.options.get("MCMW-04") == "1"
     assert shell.settings_location.value == ""
     assert shell.settings_analyte is not None
     assert shell.settings_analyte.value == ""
     assert option_values(shell.settings_analyte) == ["", "10", "11", "12"]
-    assert "LEVEL · 1096043 · ch1 · [ft]" in [
-        label for label, _ in shell.settings_analyte.options
-    ]
+    assert "LEVEL · 1096043 · ch1 · [ft]" in shell.settings_analyte.options
     assert shell.settings_range is not None
     assert shell.settings_range.value == "7d"
     assert shell.settings_publish is not None
@@ -995,7 +994,7 @@ def test_a_failed_location_load_is_reported_in_the_settings_card(
     shell.create_figure(0, 0)
 
     assert shell.settings_location is not None
-    assert shell.settings_location.options == [("All locations", "")]
+    assert shell.settings_location.options == {"All locations": ""}
     assert shell.settings_message.visible is True
     assert "Could not load locations" in shell.settings_message.object
 
@@ -1152,6 +1151,35 @@ def test_a_layout_change_does_not_create_a_draft(tmp_path) -> None:
     assert shell.settings_publish.label == "Published"
     assert shell.settings_publish.disabled is True
     assert store.load()["scenes"][0]["figures"][0]["layout"]["x"] == 3
+
+
+def _sync_widget_to_model(widget: Any) -> None:
+    """Emulate the property sync Panel performs when a widget is first rendered."""
+
+    widget._process_param_change({"options": widget.options, "value": widget.value})
+
+
+def test_selecting_a_figure_does_not_create_a_draft(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+
+    shell.select_figure(second["id"])
+    # Rebuilding the settings form must not look like an edit: Panel pushes the
+    # fresh widgets to the browser, and a Select whose value is not among its
+    # options is reset to None during that sync.
+    _sync_widget_to_model(shell.settings_location)
+    _sync_widget_to_model(shell.settings_analyte)
+    _sync_widget_to_model(shell.settings_range)
+
+    assert shell.has_unpublished_changes(first["id"]) is False
+    assert shell.has_unpublished_changes(second["id"]) is False
+    assert shell.settings_publish.label == "Published"
+    assert shell.settings_publish.disabled is True
+    assert "figure-unpublished" not in shell.figure_cards[second["id"]].css_classes
 
 
 def test_drafts_survive_a_scene_switch(tmp_path) -> None:

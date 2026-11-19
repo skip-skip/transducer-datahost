@@ -2,11 +2,13 @@
 
 Run from the repository root:
 
-    python -m panel serve dashboard/dev_panel.py --dev --index dev_panel --port 8081
+    python -m panel serve dashboard/dev_panel.py --dev --port 8081
 
-``--index dev_panel`` serves the app at ``/``; without it Panel mounts it at
-``/dev_panel``. This serves the workspace with fake data and no authentication. Use
-``scripts/dev_dashboard.ps1 -Mode prod`` for the FastAPI/auth/CSP path.
+Panel mounts the app at ``/dev_panel`` and redirects ``/`` to it, so open
+http://127.0.0.1:8081/. Do not pass ``--index``: in Panel 1.x it selects a site
+index template, not the app route. This serves the workspace with fake data and
+no authentication. Use ``scripts/dev_dashboard.ps1 -Mode prod`` for the
+FastAPI/auth/CSP path.
 """
 
 from __future__ import annotations

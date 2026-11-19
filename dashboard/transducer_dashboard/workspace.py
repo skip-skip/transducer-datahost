@@ -1103,7 +1103,7 @@ class DashboardShell:
         )
         self.settings_title = title
 
-        location_options: list[tuple[str, str]] = [("All locations", "")]
+        location_rows: list[tuple[str, str]] = [("All locations", "")]
         location_error = ""
         try:
             for row in self._load_locations():
@@ -1111,15 +1111,15 @@ class DashboardShell:
                 if not isinstance(location_id, int) or isinstance(location_id, bool):
                     continue
                 label = str(row.get("name") or f"Location {location_id}")
-                location_options.append((label, str(location_id)))
+                location_rows.append((label, str(location_id)))
         except ReadApiError as exc:
             location_error = f"Could not load locations: {exc.detail}"
 
-        location_values = [value for _, value in location_options]
+        location_options = self._option_map(location_rows)
         location_value = (
             "" if figure["location_id"] is None else str(figure["location_id"])
         )
-        if location_value not in location_values:
+        if location_value not in location_options.values():
             location_value = ""
         location = pn.widgets.Select(
             label="Location",
@@ -1129,20 +1129,20 @@ class DashboardShell:
         )
         self.settings_location = location
 
-        analyte_options: list[tuple[str, str]] = [("Choose an analyte", "")]
+        analyte_rows: list[tuple[str, str]] = [("Choose an analyte", "")]
         analyte_error = ""
         try:
             for row in self._load_series(self._selected_id(location_value)):
                 series_id = row.get("series_id")
                 if not isinstance(series_id, int) or isinstance(series_id, bool):
                     continue
-                analyte_options.append((self._series_label(row), str(series_id)))
+                analyte_rows.append((self._series_label(row), str(series_id)))
         except ReadApiError as exc:
             analyte_error = f"Could not load analytes: {exc.detail}"
 
-        analyte_values = [value for _, value in analyte_options]
+        analyte_options = self._option_map(analyte_rows)
         series_value = "" if figure["series_id"] is None else str(figure["series_id"])
-        if series_value not in analyte_values:
+        if series_value not in analyte_options.values():
             series_value = ""
         analyte = pn.widgets.Select(
             label="Analyte",
@@ -1277,6 +1277,26 @@ class DashboardShell:
         except (TypeError, ValueError):
             return None
 
+    @staticmethod
+    def _option_map(rows: list[tuple[str, str]]) -> dict[str, str]:
+        """Build ``{label: value}`` options, which is what Panel's Select expects.
+
+        A list of ``(label, value)`` tuples is *not* treated as label/value pairs
+        by Panel: the values become the tuples themselves and the value is reset
+        to ``None`` on first render. Suffix duplicate labels so every option stays
+        addressable.
+        """
+
+        options: dict[str, str] = {}
+        for label, value in rows:
+            candidate = label
+            suffix = 2
+            while candidate in options:
+                candidate = f"{label} ({suffix})"
+                suffix += 1
+            options[candidate] = value
+        return options
+
     def _set_settings_message(self, message: str, *, error: bool = False) -> None:
         pane = self.settings_message
         if pane is None:
@@ -1321,7 +1341,7 @@ class DashboardShell:
         except ReadApiError as exc:
             self._suspend_settings = True
             try:
-                analyte.options = [("Choose an analyte", "")]
+                analyte.options = {"Choose an analyte": ""}
                 analyte.value = ""
             finally:
                 self._suspend_settings = False
@@ -1336,13 +1356,13 @@ class DashboardShell:
             )
             return
 
-        options: list[tuple[str, str]] = [("Choose an analyte", "")]
+        analyte_rows: list[tuple[str, str]] = [("Choose an analyte", "")]
         for row in rows:
             series_id = row.get("series_id")
             if isinstance(series_id, int) and not isinstance(series_id, bool):
-                options.append((self._series_label(row), str(series_id)))
-        option_values = [value for _, value in options]
-        analyte_value = current if current in option_values else ""
+                analyte_rows.append((self._series_label(row), str(series_id)))
+        options = self._option_map(analyte_rows)
+        analyte_value = current if current in options.values() else ""
         self._suspend_settings = True
         try:
             analyte.options = options

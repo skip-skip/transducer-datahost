@@ -155,7 +155,6 @@ try {
             "-m", "panel", "serve",
             (Join-Path $RepoRoot "dashboard\dev_panel.py"),
             "--dev",
-            "--index", "dev_panel",
             "--address", "127.0.0.1",
             "--port", "$Port"
         )
