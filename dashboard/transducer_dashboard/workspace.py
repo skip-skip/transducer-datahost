@@ -49,7 +49,32 @@ DRAWER_WIDTH = 340
 
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; }
-.td-header { background: #fff; border-bottom: 1px solid #d8dde6; padding: 0.65rem 1rem; }
+.td-header {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  background: #fff;
+  border-bottom: 1px solid #d8dde6;
+  padding: 0.65rem 1rem;
+}
+.td-header-left { justify-self: start; }
+.td-header-center {
+  justify-self: center;
+  min-width: 0;
+  max-width: 60vw;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.td-header-right {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+.td-header-right form { margin: 0; }
 .td-rail { background: #fff; }
 .td-rail-card { border: 0; }
 .td-canvas { background: #fff; padding: 1rem 1.25rem; }
@@ -206,6 +231,7 @@ class DashboardShell:
         self.confirm_delete_button: pn.widgets.Button | None = None
         self.cancel_delete_button: pn.widgets.Button | None = None
         self.status_pane: pn.pane.HTML | None = None
+        self.header: pn.pane.HTML | None = None
         self._grid: SceneGrid | None = None
         self._figure_cards: dict[str, FigureCard] = {}
         self._grid_figure_ids: dict[str, str] = {}
@@ -769,15 +795,35 @@ class DashboardShell:
 
     def _render_header(self) -> pn.pane.HTML:
         label = html.escape(self.session.label)
-        return pn.pane.HTML(
+        scene = (
+            scenes.find_scene(self._state, self._selected_scene_id)
+            if self._selected_scene_id is not None
+            else None
+        )
+        if scene is None:
+            summary = '<span class="td-muted">No scene selected</span>'
+        else:
+            count = len(scene["figures"])
+            summary = (
+                f"<strong>{html.escape(scene['name'])}</strong> "
+                f'<span class="td-muted">· {count} '
+                f'figure{"s" if count != 1 else ""}</span>'
+            )
+        self.header = pn.pane.HTML(
             '<div class="td-header">'
-            "<strong>Transducer dashboard</strong> "
+            '<div class="td-header-left">'
+            "<strong>Transducer dashboard</strong>"
+            "</div>"
+            f'<div class="td-header-center">{summary}</div>'
+            '<div class="td-header-right">'
             f'<span class="td-muted">Signed in as {label}</span>'
-            '<form method="post" action="logout" style="display:inline; float:right;">'
+            '<form method="post" action="logout">'
             '<button type="submit">Sign out</button></form>'
+            "</div>"
             "</div>",
             sizing_mode="stretch_width",
         )
+        return self.header
 
     def _render_status(self) -> pn.pane.HTML:
         self.status_pane = pn.pane.HTML(
@@ -915,32 +961,14 @@ class DashboardShell:
             else None
         )
         if scene is None:
-            self.scene_title = pn.pane.HTML(
-                '<p class="td-muted">No scene selected.</p>'
-            )
-            self.scene_summary = pn.pane.HTML("")
             self.canvas_body = pn.pane.HTML(
                 '<div class="td-empty">Create a scene to get started.</div>',
                 sizing_mode="stretch_width",
             )
         else:
-            count = len(scene["figures"])
-            hint = (
-                " · Click an empty cell to add one." if count == 0 else ""
-            )
-            self.scene_title = pn.pane.HTML(
-                f"<h2>{html.escape(scene['name'])}</h2>"
-            )
-            self.scene_summary = pn.pane.HTML(
-                '<p class="td-muted">'
-                f"{count} figure{'s' if count != 1 else ''}{hint}"
-                "</p>"
-            )
             self.canvas_body = self._render_grid(scene)
 
         return pn.Column(
-            self.scene_title,
-            self.scene_summary,
             self.canvas_body,
             css_classes=["td-canvas"],
             sizing_mode="stretch_both",

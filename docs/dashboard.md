@@ -175,6 +175,12 @@ Write safety:
 
 ## 4. UI
 
+A single header banner spans the top of the page in three regions: the brand
+`Transducer dashboard` on the left, the selected scene name and its figure count
+(`Demo · 2 figures`, or `No scene selected`) in the center, and
+`Signed in as <user>` with Sign out on the right. The canvas below the banner is
+just the grid; the scene title and count are not repeated there.
+
 Left rail (two independent full-height ribbon drawers):
 
 The rail is a row of vertical tabs docked to the left edge of the page. Scenes

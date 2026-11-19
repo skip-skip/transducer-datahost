@@ -259,6 +259,10 @@ personal/shared split and no editor allowlist in the MVP.
 
 ```text
 Shell (custom pn.Row / pn.Column with self-hosted CSS)
+├── Header banner (three-region grid)
+│   ├── Left: "Transducer dashboard"
+│   ├── Center: scene name · figure count ("No scene selected" when none)
+│   └── Right: "Signed in as <user>" and Sign out
 ├── Left ribbon rail (44 px vertical tabs, two independent right-opening drawers,
 │   stacked left-to-right and spanning the viewport height)
 │   ├── Scenes drawer (leftmost; collapse persists per token label)
@@ -275,12 +279,16 @@ Shell (custom pn.Row / pn.Column with self-hosted CSS)
 │           ├── Publish (disabled and labeled "Published" when synced)
 │           └── Delete figure
 └── Center scene canvas
-    ├── Scene title + figure count
     └── SceneGrid (Panel GridStack subclass)
         └── FigureCard
             ├── FigureRibbon (Button; drag handle; click to select)
             └── ChartPane (Bokeh figure or placeholder)
 ```
+
+The header is a single `pn.pane.HTML` using a CSS grid (`1fr auto 1fr`) so the
+brand, scene summary, and user block stay left, center, and right without
+absolute positioning. The canvas below it is just the grid: scene title and
+figure count live only in the banner.
 
 A persistent `pn.Modal` is appended to the shell and opened only when a publish
 conflicts with another session's change. It offers **Overwrite** and **Revert to

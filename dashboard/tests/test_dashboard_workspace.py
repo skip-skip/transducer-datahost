@@ -183,15 +183,39 @@ def test_create_scene_selects_and_persists_it(tmp_path) -> None:
     assert scene is not None
     assert shell.selected_scene_id == scene["id"]
     assert shell.scene_buttons[scene["id"]].button_type == "primary"
-    assert scene["name"] in shell.scene_title.object
-    assert "0 figures" in shell.scene_summary.object
-    assert "Click an empty cell" in shell.scene_summary.object
+    assert scene["name"] in shell.header.object
+    assert "0 figures" in shell.header.object
     assert shell.grid is not None
     assert shell.figure_cards == {}
 
     stored = store.load()
     assert stored["scenes"][0]["id"] == scene["id"]
     assert stored["ui"]["alice"]["selected_scene_id"] == scene["id"]
+
+
+def test_the_header_has_brand_scene_and_user(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path, label="alice")
+    scene = shell.create_scene(name="Demo")
+    assert scene is not None
+    shell.create_figure(0, 0)
+
+    text = shell.header.object
+    assert "td-header-left" in text
+    assert "Transducer dashboard" in text
+    assert "td-header-center" in text
+    assert "Demo" in text
+    assert "· 1 figure</span>" in text
+    assert "td-header-right" in text
+    assert "Signed in as alice" in text
+    assert text.index("Transducer dashboard") < text.index("Demo")
+    assert text.index("Demo") < text.index("Signed in as")
+
+
+def test_the_header_shows_no_scene_before_one_is_selected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert "No scene selected" in shell.header.object
+    assert "figure" not in shell.header.object
 
 
 def test_only_the_selected_scene_is_highlighted(tmp_path) -> None:
@@ -414,14 +438,14 @@ def test_tray_toggle_is_wired(tmp_path) -> None:
     assert store.load()["ui"]["alice"]["scenes_tray_collapsed"] is False
 
 
-def test_scene_names_are_escaped_in_the_canvas(tmp_path) -> None:
+def test_scene_names_are_escaped_in_the_header(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
     scene = shell.create_scene(name="<script>alert(1)</script>")
 
     assert scene is not None
-    assert "<script>" not in shell.scene_title.object
-    assert "&lt;script&gt;" in shell.scene_title.object
+    assert "<script>" not in shell.header.object
+    assert "&lt;script&gt;" in shell.header.object
     assert shell.scene_buttons[scene["id"]].label == "<script>alert(1)</script>"
 
 
@@ -497,7 +521,7 @@ def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
     assert figure["layout"] == {"x": 4, "y": 3, "w": 3, "h": 2}
     assert shell.selected_figure_id == figure["id"]
     assert "figure-selected" in shell.figure_cards[figure["id"]].css_classes
-    assert "1 figure" in shell.scene_summary.object
+    assert "· 1 figure</span>" in shell.header.object
 
     stored = store.load()
     assert stored["scenes"][0]["figures"][0]["layout"] == {

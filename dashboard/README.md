@@ -29,6 +29,10 @@ immediately to the shared state. The settings drawer opens only from its tab;
 selecting or creating a figure updates its contents without changing whether it
 is open.
 
+The header banner shows the brand on the left, the selected scene name and figure
+count in the center, and the signed-in user with Sign out on the right. The
+canvas below it is just the grid.
+
 The two rail drawers (scenes and figure settings) are full-height ribbons on
 the left edge. Scenes is the leftmost tab and figure settings sits immediately
 to its right. Each title is a vertical 44 px tab; opening a drawer reveals a
