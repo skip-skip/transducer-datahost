@@ -46,11 +46,25 @@ def test_grid_height_uses_the_configured_row_height() -> None:
 
 
 def test_the_grid_background_tracks_the_cell_size() -> None:
-    assert f"calc(100% / {GRID_COLUMNS}) {GRID_ROW_HEIGHT}px" in GRID_CSS
+    assert "--td-cell-width" in GRID_CSS
+    assert "--td-cell-height" in GRID_CSS
+    assert f"calc(100% / {GRID_COLUMNS})" in GRID_CSS
+    assert f"{GRID_ROW_HEIGHT}px" in GRID_CSS
     assert GRID_BACKGROUND in GRID_CSS
     assert GRID_LINE in GRID_CSS
     assert GRID_CSS.count("linear-gradient") == 2
     assert ":host(.scene-grid)" in GRID_CSS
+
+
+def test_the_render_script_publishes_the_measured_cell_size() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "gridstack.cellWidth()" in render
+    assert "gridstack.getCellHeight()" in render
+    assert "'--td-cell-width'" in render
+    assert "'--td-cell-height'" in render
+    assert "ResizeObserver" in render
+    assert "state.sync_cell_size()" in SceneGrid._scripts["after_layout"]
 
 
 def test_scene_grid_enforces_minimum_figure_size() -> None:
