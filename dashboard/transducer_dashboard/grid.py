@@ -13,7 +13,6 @@ both the selection control and the drag handle.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
 from html import escape
 from typing import Any
@@ -25,6 +24,9 @@ from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_
 
 GRID_MIN_ROWS = 6
 GRID_EXTRA_ROWS = 3
+
+TOOL_MODES = ("add", "arrange", "lock")
+DEFAULT_TOOL_MODE = "arrange"
 
 GRID_BACKGROUND = "#f7f8fa"
 GRID_LINE = "#e2e6ec"
@@ -80,6 +82,9 @@ GRID_CSS = """
     var(--td-cell-height, {GRID_ROW_HEIGHT}px);
   box-shadow: inset -1px -1px 0 {GRID_LINE};
 }}
+.grid-stack.td-mode-add {{ cursor: crosshair; user-select: none; }}
+.grid-stack.td-mode-add .grid-stack-item {{ cursor: default; }}
+.grid-stack.td-mode-lock .grid-stack-item {{ cursor: default; }}
 """
 
 
@@ -155,9 +160,13 @@ class FigureCard(pn.Column):
 
 
 class SceneGrid(pn.layout.GridStack):
-    """GridStack with ribbon-only dragging and an empty-cell click bridge."""
+    """GridStack with ribbon-only dragging and a canvas tool mode."""
 
-    cell_click = param.String(default="")
+    tool_mode = param.ObjectSelector(
+        default=DEFAULT_TOOL_MODE,
+        objects=list(TOOL_MODES),
+        doc="Canvas tool: add figures, arrange them, or lock the layout.",
+    )
 
     min_figure_width = param.Integer(
         default=MIN_FIGURE_WIDTH, bounds=(1, None), doc="Minimum figure width."
@@ -215,6 +224,16 @@ class SceneGrid(pn.layout.GridStack):
           state.cell_resize_observer = new ResizeObserver(sync_cell_size);
           state.cell_resize_observer.observe(grid);
         }
+        function apply_mode(mode) {
+          const arranging = mode === 'arrange';
+          gridstack.enableMove(arranging);
+          gridstack.enableResize(arranging);
+          grid.classList.toggle('td-mode-add', mode === 'add');
+          grid.classList.toggle('td-mode-lock', mode === 'lock');
+          state.mode = mode;
+        }
+        state.apply_mode = apply_mode;
+        apply_mode(data.tool_mode);
         function sync_state(load=false) {
           const items = []
           for (const node of gridstack.engine.nodes) {
@@ -226,43 +245,13 @@ class SceneGrid(pn.layout.GridStack):
           }
           data.state = items
         }
-        let dragStart = null
-        let dragged = false
-        gridstack.on('dragstart', (event, el) => {
-          const node = el ? el.gridstackNode : null
-          dragStart = node ? {x: node.x, y: node.y} : null
-        })
         gridstack.on('dragstop', (event, el) => {
-          const node = el ? el.gridstackNode : null
-          dragged = !!(dragStart && node && (node.x !== dragStart.x || node.y !== dragStart.y))
-          dragStart = null
           sync_state()
-          if (dragged) {
-            setTimeout(() => { dragged = false }, 250)
-          }
         })
         gridstack.on('resizestop', (event, el) => {
           sync_state()
           view.invalidate_layout()
         })
-        grid.addEventListener('click', (event) => {
-          if (dragged && event.target.closest('.figure-ribbon')) {
-            event.stopPropagation()
-            event.preventDefault()
-            return
-          }
-          if (event.target.closest('.grid-stack-item')) {
-            return
-          }
-          const cell = gridstack.getCellFromPixel({left: event.pageX, top: event.pageY}, true)
-          if (!cell || !Number.isFinite(cell.x) || !Number.isFinite(cell.y)) {
-            return
-          }
-          if (cell.x < 0 || cell.x >= data.ncols || cell.y < 0 || cell.y >= data.nrows) {
-            return
-          }
-          data.cell_click = JSON.stringify({x: cell.x, y: cell.y, n: Date.now()})
-        }, true)
         sync_state()
         state.gridstack = gridstack
         state.init = false
@@ -278,30 +267,15 @@ class SceneGrid(pn.layout.GridStack):
           state.sync_cell_size()
         }
         """,
+        "tool_mode": """
+        if (state.apply_mode) {
+          state.apply_mode(data.tool_mode)
+        }
+        """,
     }
 
     def __init__(self, **params: Any) -> None:
         super().__init__(**params)
-        self._cell_click_handler: Callable[[int, int], Any] | None = None
-
-    def set_cell_click_handler(self, handler: Callable[[int, int], Any]) -> None:
-        self._cell_click_handler = handler
-
-    @param.depends("cell_click", watch=True)
-    def _process_cell_click(self) -> None:
-        raw = self.cell_click
-        if not raw:
-            return
-        self.cell_click = ""
-        try:
-            payload = json.loads(raw)
-            x = int(payload["x"])
-            y = int(payload["y"])
-        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
-            return
-        handler = getattr(self, "_cell_click_handler", None)
-        if handler is not None:
-            handler(x, y)
 
 
 def grid_rows(figures: list[dict[str, Any]]) -> int:
@@ -319,6 +293,7 @@ def grid_height(rows: int) -> int:
 
 
 __all__ = [
+    "DEFAULT_TOOL_MODE",
     "FigureCard",
     "GRID_BACKGROUND",
     "GRID_COLUMNS",
@@ -329,6 +304,7 @@ __all__ = [
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",
     "SceneGrid",
+    "TOOL_MODES",
     "chart_placeholder",
     "grid_height",
     "grid_rows",

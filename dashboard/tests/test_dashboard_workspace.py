@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 from typing import Any
 
@@ -233,12 +232,63 @@ def test_the_notice_is_a_fixed_toast(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
     assert shell.notice.visible is False
-    assert shell.view.objects[-1] is shell.notice
+    assert shell.notice in shell.view.objects
     styles = " ".join(str(sheet) for sheet in shell.notice.stylesheets)
     assert "position: fixed" in styles
-    assert "right: 1rem" in styles
+    assert "right: 5.5rem" in styles
     assert "bottom: 1rem" in styles
     assert "animation: td-notice-dismiss 3s" in styles
+
+
+def test_the_speed_dial_starts_closed_in_arrange_mode(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.tool_mode == "arrange"
+    assert shell.dial_button.label == "Arrange"
+    assert shell.view.objects[-1] is shell.speed_dial
+    assert set(shell.mode_buttons) == {"add", "arrange", "lock"}
+    assert all(not button.visible for button in shell.mode_buttons.values())
+    assert shell.mode_buttons["arrange"].button_type == "primary"
+
+
+def test_the_speed_dial_toggles_and_selects_a_mode(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    shell.dial_button.clicks += 1
+
+    assert shell.dial_button.label == "✕"
+    assert all(button.visible for button in shell.mode_buttons.values())
+
+    shell.mode_buttons["lock"].clicks += 1
+
+    assert shell.tool_mode == "lock"
+    assert shell.dial_button.label == "Lock"
+    assert all(not button.visible for button in shell.mode_buttons.values())
+    assert shell.mode_buttons["lock"].button_type == "primary"
+
+
+def test_the_tool_mode_is_applied_to_the_grid_and_survives_refresh(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.set_tool_mode("add")
+    shell.create_scene()
+
+    assert shell.grid is not None
+    assert shell.grid.tool_mode == "add"
+
+    shell.refresh()
+
+    assert shell.grid is not None
+    assert shell.grid.tool_mode == "add"
+
+
+def test_the_tool_mode_is_not_written_to_the_state_file(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    before = store.path.read_text(encoding="utf-8")
+
+    shell.set_tool_mode("lock")
+
+    assert store.path.read_text(encoding="utf-8") == before
 
 
 def test_only_the_selected_scene_is_highlighted(tmp_path) -> None:
@@ -554,20 +604,6 @@ def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
         "h": 2,
     }
     assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
-
-
-def test_the_grid_cell_click_bridge_creates_a_figure(tmp_path) -> None:
-    shell, store = make_shell(tmp_path)
-    shell.create_scene()
-
-    assert shell.grid is not None
-    shell.grid.cell_click = json.dumps({"x": 6, "y": 2, "n": 1})
-
-    stored = store.load()
-    figures = stored["scenes"][0]["figures"]
-    assert len(figures) == 1
-    assert figures[0]["layout"] == {"x": 6, "y": 2, "w": 3, "h": 2}
-    assert shell.selected_figure_id == figures[0]["id"]
 
 
 def test_a_figure_falls_back_to_the_first_free_slot(tmp_path) -> None:

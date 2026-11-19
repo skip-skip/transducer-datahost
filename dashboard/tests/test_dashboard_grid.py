@@ -1,11 +1,11 @@
-import json
-
 import panel as pn
 
 from transducer_dashboard.grid import (
+    DEFAULT_TOOL_MODE,
     GRID_BACKGROUND,
     GRID_CSS,
     GRID_LINE,
+    TOOL_MODES,
     FigureCard,
     SceneGrid,
     chart_placeholder,
@@ -81,30 +81,24 @@ def test_scene_grid_uses_the_ribbon_as_the_drag_handle() -> None:
 
     assert "handle: '.figure-ribbon'" in render
     assert "float: true" in render
-    assert "getCellFromPixel" in render
-    assert "data.cell_click = JSON.stringify" in render
 
 
-def test_cell_click_reports_the_clicked_cell_and_resets() -> None:
+def test_scene_grid_defaults_to_arrange_mode() -> None:
     grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
-    calls: list[tuple[int, int]] = []
-    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
 
-    grid.cell_click = json.dumps({"x": 4, "y": 2, "n": 1})
-
-    assert calls == [(4, 2)]
-    assert grid.cell_click == ""
+    assert grid.tool_mode == DEFAULT_TOOL_MODE == "arrange"
+    assert tuple(grid.param.tool_mode.objects) == TOOL_MODES
 
 
-def test_cell_click_ignores_invalid_payloads() -> None:
-    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
-    calls: list[tuple[int, int]] = []
-    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
+def test_the_mode_script_enables_movement_only_while_arranging() -> None:
+    mode_script = SceneGrid._scripts["tool_mode"]
+    render = SceneGrid._scripts["render"]
 
-    grid.cell_click = "not-json"
-
-    assert calls == []
-    assert grid.cell_click == ""
+    assert "state.apply_mode(data.tool_mode)" in mode_script
+    assert "gridstack.enableMove(arranging)" in render
+    assert "gridstack.enableResize(arranging)" in render
+    assert "td-mode-add" in render
+    assert "td-mode-lock" in render
 
 
 def test_scene_grid_places_a_card_in_the_requested_cells() -> None:
