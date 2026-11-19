@@ -94,6 +94,37 @@ GRID_CSS = """
   background: rgba(31, 111, 235, 0.14);
   pointer-events: none;
 }}
+.grid-stack > .td-pending-figure {{
+  position: absolute;
+  z-index: 1;
+  display: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid #1f6feb;
+  border-radius: 0.35rem;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18);
+  pointer-events: none;
+  animation: td-pending-pulse 1.4s ease-in-out infinite;
+}}
+.grid-stack > .td-pending-figure .td-pending-ribbon {{
+  flex: 0 0 2rem;
+  border-bottom: 1px solid #d8dde6;
+  background: #eef2f7;
+}}
+.grid-stack > .td-pending-figure .td-pending-body {{
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  color: #5b6472;
+  font-size: 0.85rem;
+}}
+@keyframes td-pending-pulse {{
+  0%, 100% {{ box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18); }}
+  50% {{ box-shadow: 0 0 0 4px rgba(31, 111, 235, 0.08); }}
+}}
 """
 
 
@@ -235,9 +266,19 @@ class SceneGrid(pn.layout.GridStack):
         const paint = document.createElement('div');
         paint.className = 'td-paint';
         grid.prepend(paint);
+
+        const pendingCard = document.createElement('div');
+        pendingCard.className = 'td-pending-figure';
+        pendingCard.innerHTML =
+          '<div class="td-pending-ribbon"></div>' +
+          '<div class="td-pending-body">Creating figure&hellip;</div>';
+        grid.prepend(pendingCard);
+
         let paintAnchor = null;
         let paintRect = null;
         let painting = false;
+        let pending = false;
+        let pendingRect = null;
 
         function cell_from_event(event) {
           const cell = gridstack.getCellFromPixel(
@@ -330,6 +371,43 @@ class SceneGrid(pn.layout.GridStack):
           painting = false;
         }
 
+        function show_pending(rect) {
+          if (!rect) {
+            pendingCard.style.display = 'none';
+            pendingRect = null;
+            return;
+          }
+          pendingRect = rect;
+          const cell_width = gridstack.cellWidth();
+          const cell_height = gridstack.getCellHeight();
+          pendingCard.style.left = `${rect.x * cell_width}px`;
+          pendingCard.style.top = `${rect.y * cell_height}px`;
+          pendingCard.style.width = `${rect.w * cell_width}px`;
+          pendingCard.style.height = `${rect.h * cell_height}px`;
+          pendingCard.style.display = 'flex';
+        }
+
+        function clear_pending() {
+          pending = false;
+          pendingRect = null;
+          pendingCard.style.display = 'none';
+          if (state.pending_timeout) {
+            clearTimeout(state.pending_timeout);
+            state.pending_timeout = null;
+          }
+        }
+
+        function arm_pending_timeout() {
+          if (state.pending_timeout) {
+            clearTimeout(state.pending_timeout);
+          }
+          state.pending_timeout = setTimeout(() => {
+            if (pending) {
+              clear_pending();
+            }
+          }, 15000);
+        }
+
         state.sync_cell_size = sync_cell_size;
         sync_cell_size();
         if (typeof ResizeObserver !== 'undefined') {
@@ -340,6 +418,9 @@ class SceneGrid(pn.layout.GridStack):
             sync_cell_size();
             if (paintRect) {
               show_paint(paintRect);
+            }
+            if (pendingRect) {
+              show_pending(pendingRect);
             }
           });
           state.cell_resize_observer.observe(grid);
@@ -352,13 +433,14 @@ class SceneGrid(pn.layout.GridStack):
           grid.classList.toggle('td-mode-lock', locked);
           if (locked) {
             clear_paint();
+            clear_pending();
           }
         }
         state.apply_lock = apply_lock;
         apply_lock(data.locked);
 
         grid.addEventListener('pointerdown', (event) => {
-          if (data.locked || event.button !== 0) {
+          if (data.locked || pending || event.button !== 0) {
             return;
           }
           if (event.target.closest('.grid-stack-item')) {
@@ -382,7 +464,7 @@ class SceneGrid(pn.layout.GridStack):
         });
 
         grid.addEventListener('pointermove', (event) => {
-          if (data.locked) {
+          if (data.locked || pending) {
             return;
           }
           if (painting && paintAnchor) {
@@ -409,6 +491,9 @@ class SceneGrid(pn.layout.GridStack):
           paintAnchor = null;
           clear_paint();
           if (rect) {
+            pending = true;
+            show_pending(rect);
+            arm_pending_timeout();
             data.figure_span = JSON.stringify({
               x: rect.x, y: rect.y, w: rect.w, h: rect.h, n: Date.now()
             });
@@ -423,14 +508,37 @@ class SceneGrid(pn.layout.GridStack):
         });
 
         grid.addEventListener('pointercancel', () => {
-          clear_paint();
-        });
-
-        grid.addEventListener('pointerleave', () => {
-          if (!painting) {
+          if (!pending) {
             clear_paint();
           }
         });
+
+        grid.addEventListener('pointerleave', () => {
+          if (!painting && !pending) {
+            clear_paint();
+          }
+        });
+
+        if (typeof MutationObserver !== 'undefined') {
+          const figureObserver = new MutationObserver((mutations) => {
+            if (!pending) {
+              return;
+            }
+            for (const mutation of mutations) {
+              for (const node of mutation.addedNodes) {
+                if (
+                  node.nodeType === 1 &&
+                  node.classList.contains('grid-stack-item') &&
+                  node.hasAttribute('data-id')
+                ) {
+                  clear_pending();
+                  return;
+                }
+              }
+            }
+          });
+          figureObserver.observe(grid, {childList: true, subtree: true});
+        }
         function sync_state(load=false) {
           const items = []
           for (const node of gridstack.engine.nodes) {

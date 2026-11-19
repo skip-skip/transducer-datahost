@@ -584,10 +584,7 @@ class DashboardShell:
             self._recover(str(exc))
             return None
 
-        self._selected_figure_id = figure["id"]
-        self._delete_confirm = False
-        self._clear_notice()
-        self.refresh()
+        self._refresh_after_create(figure)
         return figure
 
     def create_figure_span(
@@ -624,11 +621,65 @@ class DashboardShell:
             self._recover(str(exc))
             return None
 
+        self._refresh_after_create(figure)
+        return figure
+
+    def _refresh_after_create(self, figure: dict[str, Any]) -> None:
+        """Show a new figure without rebuilding the whole shell."""
+
         self._selected_figure_id = figure["id"]
         self._delete_confirm = False
         self._clear_notice()
-        self.refresh()
-        return figure
+        if not self._append_figure_card(figure):
+            self._rebuild_canvas()
+            return
+        self._view.objects = [self._render_header(), *self._view.objects[1:]]
+        self._update_selection()
+        self._schedule_figure_chart_load(figure["id"])
+
+    def _append_figure_card(self, figure: dict[str, Any]) -> bool:
+        """Add the card to the live grid when the existing rows can hold it."""
+
+        if self._grid is None or self._selected_scene_id is None:
+            return False
+        scene = scenes.find_scene(self._state, self._selected_scene_id)
+        if scene is None:
+            return False
+        if grid_rows(scene["figures"]) > int(self._grid.nrows or 0):
+            return False
+        display = dict(self._effective_figure(figure))
+        display["title"] = self._figure_title(display)
+        card = FigureCard(display, on_select=self.select_figure)
+        card.set_selected(figure["id"] == self._selected_figure_id)
+        card.set_unpublished(figure["id"] in self._drafts)
+        card.set_locked(self._locked)
+        layout = figure["layout"]
+        self._grid[
+            layout["y"] : layout["y"] + layout["h"],
+            layout["x"] : layout["x"] + layout["w"],
+        ] = card
+        self._figure_cards[figure["id"]] = card
+        self._grid_figure_ids[str(id(card))] = figure["id"]
+        return True
+
+    def _rebuild_canvas(self) -> None:
+        """Fall back to a canvas-only rebuild when the grid needs more rows."""
+
+        objects = list(self._view.objects)
+        if len(objects) < 2 or not isinstance(objects[1], pn.Row):
+            self.refresh()
+            return
+        row = objects[1]
+        if len(row.objects) < 2:
+            self.refresh()
+            return
+        row.objects = [row.objects[0], self._render_canvas()]
+        objects[0] = self._render_header()
+        self._view.objects = objects
+        self._update_selection()
+
+    def _schedule_figure_chart_load(self, figure_id: str) -> None:
+        pn.state.execute(lambda: self._refresh_figure_chart(figure_id))
 
     def _on_grid_state(self, event: Any) -> None:
         self.apply_grid_state(event.new or [])

@@ -388,8 +388,10 @@ left at `right: 7.5rem` so the two do not overlap.
 4. While dragging, the rectangle grows toward the cursor one row or column at a
    time. It stops at the first occupied cell, so a span never overlaps a figure
    or leaves the grid. Growing left or up moves the origin with it.
-5. `pointerup` writes the span to the `figure_span` string parameter as JSON.
-   `pointercancel` and leaving the canvas clear the overlay.
+5. `pointerup` writes the span to the `figure_span` string parameter as JSON and
+   leaves a card-shaped `.td-pending-figure` placeholder in the painted cells.
+   The placeholder has a ribbon bar and a “Creating figure…” body with a subtle
+   pulse, so the empty grid is not exposed while the figure is persisted.
 6. A Python watcher clears the parameter and calls
    `DashboardShell.create_figure_span`, which runs `scenes.add_figure_at` inside
    one `StateStore.mutate`. The new figure keeps the exact painted layout, is
@@ -397,8 +399,31 @@ left at `right: 7.5rem` so the two do not overlap.
 7. `add_figure_at` validates the bounds, the one-cell minimum, and occupancy. A
    painted span never falls back to a free slot; a conflicting write reports
    instead of creating a figure.
+8. The placeholder clears when a real `.grid-stack-item[data-id]` is added to
+   the grid, which is detected with a `MutationObserver`. A 15-second fallback
+   timeout clears it if the backend never answers. Locking the canvas also
+   clears it. New paint gestures and hover previews are ignored while a figure
+   is pending.
 
 Hovering without pressing shows a one-cell preview.
+
+### Targeted refresh after create
+
+`DashboardShell._refresh_after_create` avoids a full-shell `refresh()` when a
+figure is created:
+
+- If the new figure fits in the existing grid rows, `_append_figure_card` places
+  the card directly in the live `SceneGrid`, records it in `_figure_cards` and
+  `_grid_figure_ids`, and leaves every existing card untouched.
+- The header is re-rendered for the new figure count, the selection and settings
+  drawer are updated, and only the new figure's chart is loaded.
+- If the new figure needs more rows, `_rebuild_canvas` replaces only the canvas
+  row and the header. The scene/settings rail is preserved rather than rebuilt.
+- A full `refresh()` remains the fallback if the view structure is unexpected.
+
+The targeted path is what makes the pending placeholder hand off to the real
+card quickly: the grid is not torn down, so the placeholder is replaced in place
+instead of disappearing with the old canvas.
 
 ### Ribbon click versus drag
 
