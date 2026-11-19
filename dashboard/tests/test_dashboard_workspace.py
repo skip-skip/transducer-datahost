@@ -7,6 +7,7 @@ import pytest
 
 from transducer_dashboard import scenes
 from transducer_dashboard.auth import Session
+from transducer_dashboard.grid import GRID_BACKGROUND
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
 from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
@@ -218,6 +219,14 @@ def test_the_header_shows_no_scene_before_one_is_selected(tmp_path) -> None:
 
     assert "No scene selected" in shell.header.object
     assert "figure" not in shell.header.object
+
+
+def test_the_canvas_uses_the_grid_background(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+
+    canvas = shell.view.objects[1].objects[1]
+    assert canvas.styles["background"] == GRID_BACKGROUND
 
 
 def test_the_notice_is_a_fixed_toast(tmp_path) -> None:

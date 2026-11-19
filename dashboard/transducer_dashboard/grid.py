@@ -26,8 +26,10 @@ from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_
 GRID_MIN_ROWS = 6
 GRID_EXTRA_ROWS = 3
 
+GRID_BACKGROUND = "#f7f8fa"
+GRID_LINE = "#e2e6ec"
+
 GRID_CSS = """
-.scene-grid { background: #fbfcfd; }
 .figure-card {
   background: #fff;
   border: 1px solid #d8dde6;
@@ -63,6 +65,21 @@ GRID_CSS = """
   color: #5b6472;
 }
 .figure-chart-error { color: #b42318; }
+""" + f"""
+:host(.scene-grid) {{ background: {GRID_BACKGROUND}; }}
+.grid-stack {{
+  background-color: {GRID_BACKGROUND};
+  background-image:
+    linear-gradient(to right, {GRID_LINE} 1px, transparent 1px),
+    linear-gradient(to bottom, {GRID_LINE} 1px, transparent 1px);
+  /* The render script publishes the cell size GridStack actually snapped to,
+     so the lines stay on cell edges at any width or row height. The values
+     below are only fallbacks for the first paint. */
+  background-size:
+    var(--td-cell-width, calc(100% / {GRID_COLUMNS}))
+    var(--td-cell-height, {GRID_ROW_HEIGHT}px);
+  box-shadow: inset -1px -1px 0 {GRID_LINE};
+}}
 """
 
 
@@ -176,6 +193,28 @@ class SceneGrid(pn.layout.GridStack):
           options.cellHeight = Math.floor(height/data.nrows);
         }
         const gridstack = GridStack.init(options, grid);
+        // Paint the cell grid from the geometry GridStack is using. Row heights
+        // are pixels and column widths are percentages, so measuring both keeps
+        // the background on the same snapping intervals as the figures.
+        function sync_cell_size() {
+          const cell_width = gridstack.cellWidth();
+          const cell_height = gridstack.getCellHeight();
+          if (Number.isFinite(cell_width) && cell_width > 0) {
+            grid.style.setProperty('--td-cell-width', `${cell_width}px`);
+          }
+          if (Number.isFinite(cell_height) && cell_height > 0) {
+            grid.style.setProperty('--td-cell-height', `${cell_height}px`);
+          }
+        }
+        state.sync_cell_size = sync_cell_size;
+        sync_cell_size();
+        if (typeof ResizeObserver !== 'undefined') {
+          if (state.cell_resize_observer) {
+            state.cell_resize_observer.disconnect();
+          }
+          state.cell_resize_observer = new ResizeObserver(sync_cell_size);
+          state.cell_resize_observer.observe(grid);
+        }
         function sync_state(load=false) {
           const items = []
           for (const node of gridstack.engine.nodes) {
@@ -228,6 +267,17 @@ class SceneGrid(pn.layout.GridStack):
         state.gridstack = gridstack
         state.init = false
         """,
+        "after_layout": """
+        self.nrows()
+        if (!state.init) {
+          state.init = true
+          view.invalidate_layout()
+        }
+        state.gridstack.engine._notify()
+        if (state.sync_cell_size) {
+          state.sync_cell_size()
+        }
+        """,
     }
 
     def __init__(self, **params: Any) -> None:
@@ -270,9 +320,11 @@ def grid_height(rows: int) -> int:
 
 __all__ = [
     "FigureCard",
+    "GRID_BACKGROUND",
     "GRID_COLUMNS",
     "GRID_CSS",
     "GRID_EXTRA_ROWS",
+    "GRID_LINE",
     "GRID_MIN_ROWS",
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",

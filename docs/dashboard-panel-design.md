@@ -334,7 +334,18 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 - set the GridStack `handle` option to `.figure-ribbon`;
 - set `minW = 3` and `minH = 2`;
 - attach a background click listener for empty-cell creation;
-- ignore clicks that originate inside a `.grid-stack-item`.
+- ignore clicks that originate inside a `.grid-stack-item`;
+- publish the measured cell width and height as CSS variables for the grid
+  background.
+
+The grid canvas is light gray (`#f7f8fa`) with 1 px cell lines (`#e2e6ec`).
+The rule targets the inner `.grid-stack` element and sizes the background with
+two CSS variables, `--td-cell-width` and `--td-cell-height`. The render script
+sets them from `gridstack.cellWidth()` and `gridstack.getCellHeight()` and
+refreshes them from a `ResizeObserver` and after each layout, so the lines follow
+the cell size GridStack actually snaps to rather than a fixed guess. The rule
+lives in `GRID_CSS` because the canvas is inside the grid component's shadow
+root, where the shell stylesheet cannot reach.
 
 ### Empty-cell click
 
