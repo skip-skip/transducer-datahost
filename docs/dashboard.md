@@ -227,6 +227,8 @@ Figure settings drawer:
 Scene canvas (right of the drawers):
 
 - A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
+- The canvas is light gray with 1 px grid lines on the cell boundaries, so
+  empty cells read as a working grid behind the white figure cards.
 - Clicking an empty cell creates a minimum-size figure at that cell. If the cell
   cannot fit one, the first free slot is used; a full scene reports instead of
   overlapping figures.

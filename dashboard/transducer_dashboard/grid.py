@@ -26,8 +26,10 @@ from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_
 GRID_MIN_ROWS = 6
 GRID_EXTRA_ROWS = 3
 
+GRID_BACKGROUND = "#f7f8fa"
+GRID_LINE = "#e2e6ec"
+
 GRID_CSS = """
-.scene-grid { background: #fbfcfd; }
 .figure-card {
   background: #fff;
   border: 1px solid #d8dde6;
@@ -63,6 +65,16 @@ GRID_CSS = """
   color: #5b6472;
 }
 .figure-chart-error { color: #b42318; }
+""" + f"""
+:host(.scene-grid) {{ background: {GRID_BACKGROUND}; }}
+.grid-stack {{
+  background-color: {GRID_BACKGROUND};
+  background-image:
+    linear-gradient(to right, {GRID_LINE} 1px, transparent 1px),
+    linear-gradient(to bottom, {GRID_LINE} 1px, transparent 1px);
+  background-size: calc(100% / {GRID_COLUMNS}) {GRID_ROW_HEIGHT}px;
+  box-shadow: inset -1px -1px 0 {GRID_LINE};
+}}
 """
 
 
@@ -270,9 +282,11 @@ def grid_height(rows: int) -> int:
 
 __all__ = [
     "FigureCard",
+    "GRID_BACKGROUND",
     "GRID_COLUMNS",
     "GRID_CSS",
     "GRID_EXTRA_ROWS",
+    "GRID_LINE",
     "GRID_MIN_ROWS",
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",

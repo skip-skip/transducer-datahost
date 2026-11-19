@@ -27,6 +27,7 @@ import panel as pn
 from . import charts, scenes
 from .auth import Session
 from .grid import (
+    GRID_BACKGROUND,
     GRID_CSS,
     FigureCard,
     SceneGrid,
@@ -990,6 +991,7 @@ class DashboardShell:
                 "z-index": "1",
                 "min-height": "0",
                 "overflow-y": "auto",
+                "background": GRID_BACKGROUND,
             },
         )
 

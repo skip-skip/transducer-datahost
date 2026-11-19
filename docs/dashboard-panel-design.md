@@ -336,6 +336,13 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 - attach a background click listener for empty-cell creation;
 - ignore clicks that originate inside a `.grid-stack-item`.
 
+The grid canvas is light gray (`#f7f8fa`) with 1 px cell lines (`#e2e6ec`).
+The rule targets the inner `.grid-stack` element and builds its `background-size`
+from `GRID_COLUMNS` and `GRID_ROW_HEIGHT`, so the lines stay on cell edges as
+GridStack places and resizes figures. It lives in `GRID_CSS` because the canvas
+is inside the grid component's shadow root, where the shell stylesheet cannot
+reach.
+
 ### Empty-cell click
 
 1. The browser computes the clicked cell with GridStack's
