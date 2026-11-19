@@ -6,6 +6,7 @@ import pytest
 
 from transducer_dashboard.state import (
     GRID_COLUMNS,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
     StateError,
@@ -150,14 +151,32 @@ def test_accepts_null_and_integer_series_scope(tmp_path) -> None:
     assert state["scenes"][0]["figures"][1]["series_id"] == 42
 
 
+def test_a_single_cell_is_a_valid_figure_size(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    write_document(
+        tmp_path,
+        make_document(make_scene(figures=[make_figure()])),
+    )
+
+    stored = store.load()
+
+    assert stored["scenes"][0]["figures"][0]["layout"] == {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1,
+    }
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
         ({"location_id": "7"}, "location_id"),
         ({"series_id": 1.5}, "series_id"),
         ({"range": "1y"}, "range"),
-        ({"layout": {"x": 0, "y": 0, "w": 2, "h": 2}}, "at least 3"),
-        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 1}}, "at least 2"),
+        ({"layout": {"x": 0, "y": 0, "w": 0, "h": 2}}, "at least 1"),
+        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 0}}, "at least 1"),
         ({"layout": {"x": 10, "y": 0, "w": 3, "h": 2}}, "fit within"),
         ({"layout": {"x": -1, "y": 0, "w": 3, "h": 2}}, "non-negative"),
         ({"layout": {"x": 0, "y": 0, "w": 3}}, "missing keys"),
@@ -194,6 +213,34 @@ def test_rejects_invalid_ui(tmp_path, ui: dict[str, Any], match: str) -> None:
 
     with pytest.raises(StateError, match=match):
         store.load()
+
+
+def test_out_of_bounds_layouts_are_pulled_into_the_fixed_grid(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    write_document(
+        tmp_path,
+        make_document(
+            make_scene(
+                figures=[
+                    make_figure(
+                        "f1", layout={"x": 0, "y": 8, "w": 3, "h": 2}
+                    ),
+                    make_figure(
+                        "f2", layout={"x": 6, "y": 0, "w": 3, "h": 8}
+                    ),
+                ]
+            )
+        ),
+    )
+
+    state = store.load()
+
+    layouts = [figure["layout"] for figure in state["scenes"][0]["figures"]]
+    assert layouts[0] == {"x": 0, "y": GRID_ROWS - 2, "w": 3, "h": 2}
+    assert layouts[1] == {"x": 6, "y": 0, "w": 3, "h": GRID_ROWS}
+    saved = json.loads((tmp_path / "state.json").read_text(encoding="utf-8"))
+    assert saved["scenes"][0]["figures"][0]["layout"] == layouts[0]
 
 
 def test_version_1_document_is_archived_not_published(tmp_path) -> None:

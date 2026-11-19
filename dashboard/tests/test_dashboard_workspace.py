@@ -10,7 +10,12 @@ from transducer_dashboard.auth import Session
 from transducer_dashboard.grid import GRID_BACKGROUND
 from transducer_dashboard.read_client import ReadApiError
 from transducer_dashboard.settings import DashboardSettings
-from transducer_dashboard.state import GRID_COLUMNS, GRID_ROW_HEIGHT, StateStore
+from transducer_dashboard.state import (
+    GRID_COLUMNS,
+    GRID_ROW_HEIGHT,
+    GRID_ROWS,
+    StateStore,
+)
 from transducer_dashboard.workspace import (
     DRAWER_CSS,
     DRAWER_TITLE_CSS,
@@ -233,12 +238,80 @@ def test_the_notice_is_a_fixed_toast(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
     assert shell.notice.visible is False
-    assert shell.view.objects[-1] is shell.notice
+    assert shell.notice in shell.view.objects
     styles = " ".join(str(sheet) for sheet in shell.notice.stylesheets)
+    assert "position: fixed" in styles
+    assert "right: 7.5rem" in styles
+    assert "bottom: 1rem" in styles
+    assert "animation: td-notice-dismiss 3s" in styles
+
+
+def test_the_lock_button_starts_unlocked(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.locked is False
+    assert shell.lock_button.label == "Lock"
+    assert shell.lock_button.button_type == "light"
+    assert shell.view.objects[-1] is shell.lock_control
+    styles = " ".join(str(sheet) for sheet in shell.lock_control.stylesheets)
     assert "position: fixed" in styles
     assert "right: 1rem" in styles
     assert "bottom: 1rem" in styles
-    assert "animation: td-notice-dismiss 3s" in styles
+
+
+def test_the_lock_button_is_disabled_until_a_scene_is_selected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+
+    assert shell.lock_button.disabled is True
+
+    shell.create_scene()
+
+    assert shell.lock_button.disabled is False
+
+
+def test_the_lock_button_toggles_the_layout_lock(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+
+    shell.lock_button.clicks += 1
+
+    assert shell.locked is True
+    assert shell.lock_button.label == "Unlock"
+    assert shell.lock_button.button_type == "warning"
+    assert shell.grid is not None
+    assert shell.grid.locked is True
+
+    shell.lock_button.clicks += 1
+
+    assert shell.locked is False
+    assert shell.lock_button.label == "Lock"
+    assert shell.lock_button.button_type == "light"
+    assert shell.grid is not None
+    assert shell.grid.locked is False
+
+
+def test_the_lock_state_is_applied_to_the_grid_and_survives_refresh(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_locked(True)
+
+    assert shell.grid is not None
+    assert shell.grid.locked is True
+
+    shell.refresh()
+
+    assert shell.grid is not None
+    assert shell.grid.locked is True
+
+
+def test_the_lock_state_is_not_written_to_the_state_file(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    before = store.path.read_text(encoding="utf-8")
+
+    shell.set_locked(True)
+
+    assert store.path.read_text(encoding="utf-8") == before
 
 
 def test_only_the_selected_scene_is_highlighted(tmp_path) -> None:
@@ -528,12 +601,13 @@ def test_a_selected_scene_shows_an_empty_grid(tmp_path) -> None:
     assert shell.grid is not None
     assert shell.grid.ncols == GRID_COLUMNS
     assert shell.grid.nrows == 6
-    assert shell.grid.sizing_mode == "stretch_both"
+    assert shell.grid.sizing_mode == "stretch_width"
+    assert shell.grid.height == 6 * GRID_ROW_HEIGHT
     assert shell.canvas_body.height == 6 * GRID_ROW_HEIGHT
     assert shell.figure_cards == {}
 
 
-def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
+def test_create_figure_creates_a_default_size_figure(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     scene = shell.create_scene()
     assert scene is not None
@@ -556,18 +630,172 @@ def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
     assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
 
 
-def test_the_grid_cell_click_bridge_creates_a_figure(tmp_path) -> None:
+def test_painting_a_span_creates_a_figure_with_that_layout(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
 
+    figure = shell.create_figure_span(2, 1, 5, 4)
+
+    assert figure is not None
+    assert figure["layout"] == {"x": 2, "y": 1, "w": 5, "h": 4}
+    assert shell.selected_figure_id == figure["id"]
+    assert shell.figure_cards[figure["id"]].ribbon.label == "Untitled figure"
+
+    stored = store.load()
+    assert stored["scenes"][0]["figures"][0]["layout"] == {
+        "x": 2,
+        "y": 1,
+        "w": 5,
+        "h": 4,
+    }
+    assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
+
+
+def test_painting_a_single_cell_creates_a_one_cell_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
     assert shell.grid is not None
-    shell.grid.cell_click = json.dumps({"x": 6, "y": 2, "n": 1})
+
+    shell.grid.figure_span = json.dumps({"x": 11, "y": 5, "w": 1, "h": 1, "n": 1})
 
     stored = store.load()
     figures = stored["scenes"][0]["figures"]
     assert len(figures) == 1
-    assert figures[0]["layout"] == {"x": 6, "y": 2, "w": 3, "h": 2}
+    assert figures[0]["layout"] == {"x": 11, "y": 5, "w": 1, "h": 1}
     assert shell.selected_figure_id == figures[0]["id"]
+
+
+def test_the_grid_paint_bridge_creates_the_painted_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    assert shell.grid is not None
+
+    shell.grid.figure_span = json.dumps({"x": 6, "y": 2, "w": 3, "h": 3, "n": 1})
+
+    stored = store.load()
+    figures = stored["scenes"][0]["figures"]
+    assert len(figures) == 1
+    assert figures[0]["layout"] == {"x": 6, "y": 2, "w": 3, "h": 3}
+    assert shell.selected_figure_id == figures[0]["id"]
+
+
+def test_a_new_figure_is_appended_to_the_live_grid(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    assert first is not None
+    grid = shell.grid
+    first_card = shell.figure_cards[first["id"]]
+    assert grid is not None
+
+    second = shell.create_figure(3, 0)
+
+    assert second is not None
+    assert shell.grid is grid
+    assert shell.figure_cards[first["id"]] is first_card
+    assert second["id"] in shell.figure_cards
+    assert shell.selected_figure_id == second["id"]
+    assert "figure-selected" in shell.figure_cards[second["id"]].css_classes
+    assert "· 2 figures</span>" in shell.header.object
+
+
+def test_a_new_figure_loads_only_its_own_chart(tmp_path, monkeypatch) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+    loaded: list[str] = []
+    monkeypatch.setattr(shell, "_refresh_figure_chart", loaded.append)
+
+    second = shell.create_figure(3, 0)
+
+    assert second is not None
+    assert loaded == [second["id"]]
+
+
+def test_creating_a_figure_never_resizes_the_grid(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.create_figure(0, 0)
+    grid = shell.grid
+    rail = shell.rail
+    tray = shell.tray_card
+    assert grid is not None
+
+    second = shell.create_figure(0, 5)
+
+    assert second is not None
+    # Row 5 cannot hold the default two-row figure, so it lands in the first
+    # free slot instead of growing the grid.
+    assert second["layout"] == {"x": 3, "y": 0, "w": 3, "h": 2}
+    assert shell.grid is grid
+    assert shell.grid.nrows == GRID_ROWS
+    assert shell.grid.height == GRID_ROWS * GRID_ROW_HEIGHT
+    assert shell.canvas_body.height == GRID_ROWS * GRID_ROW_HEIGHT
+    assert shell.rail is rail
+    assert shell.tray_card is tray
+    assert second["id"] in shell.figure_cards
+    assert "· 2 figures</span>" in shell.header.object
+
+
+def test_painting_is_ignored_while_locked(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_locked(True)
+
+    assert shell.create_figure_span(2, 1, 5, 4) is None
+    assert store.load()["scenes"][0]["figures"] == []
+
+
+def test_locking_prevents_creating_a_default_size_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_locked(True)
+
+    assert shell.create_figure(4, 3) is None
+    assert store.load()["scenes"][0]["figures"] == []
+
+
+def test_locking_prevents_selecting_a_figure(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    shell.select_figure(first["id"])
+
+    shell.set_locked(True)
+    shell.select_figure(second["id"])
+
+    assert shell.selected_figure_id == first["id"]
+    assert shell.figure_cards[second["id"]].ribbon.disabled is True
+
+
+def test_unlocking_restores_figure_selection(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    shell.select_figure(first["id"])
+    shell.set_locked(True)
+
+    shell.set_locked(False)
+    shell.select_figure(second["id"])
+
+    assert shell.selected_figure_id == second["id"]
+    assert shell.figure_cards[second["id"]].ribbon.disabled is False
+
+
+def test_painting_over_an_occupied_span_is_rejected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure_span(0, 0, 3, 2)
+
+    assert first is not None
+    assert shell.create_figure_span(1, 1, 3, 2) is None
+    assert len(shell.figure_cards) == 1
 
 
 def test_a_figure_falls_back_to_the_first_free_slot(tmp_path) -> None:

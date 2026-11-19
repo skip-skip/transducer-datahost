@@ -226,15 +226,30 @@ Figure settings drawer:
 
 Scene canvas (right of the drawers):
 
-- A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
+- A fixed 12-column, 6-row grid with 220 px rows; the smallest figure is a
+  single cell. The grid scales in width with the browser but never changes its
+  row count, height, or card density when figures are created.
 - The canvas is light gray with 1 px grid lines on the cell boundaries, so
   empty cells read as a working grid behind the white figure cards.
-- Clicking an empty cell creates a minimum-size figure at that cell. If the cell
-  cannot fit one, the first free slot is used; a full scene reports instead of
-  overlapping figures.
+- A **Lock** / **Unlock** button fixed to the bottom-right overlays the canvas.
+  The lock is session-local: it is not saved and resets to unlocked on reload.
+  The button stays visible but is disabled while no scene is selected.
+- While unlocked, the canvas is editable: figures move and resize, and painting
+  an empty rectangle creates a figure. Hovering an empty cell shows a one-cell
+  preview; click to create a single-cell figure, or drag to grow the highlight
+  toward the cursor. The span stops at the first occupied cell. Releasing
+  creates a figure with exactly that span and selects it. A drag that starts on
+  a figure moves or selects it instead.
+- After release, the painted cells immediately show a card-shaped “Creating
+  figure…” placeholder while the backend persists the figure. It is replaced by
+  the real card as soon as the figure arrives, without rebuilding the rest of
+  the shell.
+- **Lock** disables moving, resizing, painting, and figure selection.
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
   to resize. Layouts persist immediately and survive reloads and restarts.
+  Figures stay inside the fixed canvas; when it fills up, creating another
+  figure reports that the scene has no room instead of growing the grid.
 
 Charts:
 
@@ -390,44 +405,55 @@ Automated coverage in `dashboard/tests`:
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, the per-route CSP, Panel mount,
   self-hosted resources, and the absence of external CDN URLs.
-- Panel shell, grid, settings-drawer callbacks, and chart builder/windowing.
+- Panel shell, grid, layout lock, canvas painting, settings-drawer callbacks,
+  and chart builder/windowing.
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `198 passed`; `ruff check dashboard` and
+Latest local run: `244 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
-grid layout persistence, the empty-cell bridge, settings publish/reload, and
-Bokeh chart rendering into a document.
+grid layout persistence, the lock toggle, the paint bridge, settings
+publish/reload, and Bokeh chart rendering into a document.
 
 Manual browser checklist:
 
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
-3. Click an empty cell; a minimum-size figure appears there.
-4. Click a ribbon; the figure highlights and the settings drawer keeps its
-   current open/closed state.
-5. Collapse each drawer independently. The scenes drawer stays collapsed after a
+3. While unlocked, drag a ribbon to move a figure and drag its corner to resize;
+   the layout survives a reload and a restart.
+4. A plain click on an empty cell creates a 1 x 1 figure. Hover to see the
+   one-cell preview, then drag to paint a larger footprint and release; the
+   painted cells instantly show a “Creating figure…” card that is replaced by
+   the real figure with that exact span, selected. Painting stops at an existing
+   figure, and a drag that starts on a figure moves or selects it. The grid
+   keeps the same size, row count, and card density before and after the figure
+   appears.
+5. Click Lock; figures no longer move, resize, or respond to selection, and
+   painting is unavailable. Click Unlock to edit again. Reload; the canvas
+   starts unlocked.
+6. Collapse each drawer independently. The scenes drawer stays collapsed after a
    reload; the settings drawer resets to open.
-6. Drag and resize a figure; the layout survives a reload and a restart.
-7. Set title, location, analyte, and range without publishing; the figure card
+7. Click a ribbon; the figure highlights and the settings drawer keeps its
+   current open/closed state.
+8. Set title, location, analyte, and range without publishing; the figure card
    gets a yellow border (orange while selected), the chart previews the draft,
    and the button reads `Publish`. Reload; the draft is gone and the card is
    unmarked.
-8. Publish; the button changes to `Published`, the border clears, the chart
+9. Publish; the button changes to `Published`, the border clears, the chart
    renders for 24h/7d/30d, and the change survives a reload.
-9. In a second session, edit the same setting and publish, then publish the first
-   session's draft; the conflict modal appears. Overwrite keeps the first
-   session's value; Revert restores the second session's value.
-10. Delete a figure; the scene updates, the selection clears, and any draft for
+10. In a second session, edit the same setting and publish, then publish the first
+    session's draft; the conflict modal appears. Overwrite keeps the first
+    session's value; Revert restores the second session's value.
+11. Delete a figure; the scene updates, the selection clears, and any draft for
     it is dropped.
-11. Log in with a second token; the same scenes are visible.
-12. Confirm no `POSTGRES_*` variables in the dashboard container.
-13. Confirm no external network requests in the browser network log. The
+12. Log in with a second token; the same scenes are visible.
+13. Confirm no `POSTGRES_*` variables in the dashboard container.
+14. Confirm no external network requests in the browser network log. The
     `cdn.jsdelivr.net/*.map` messages that appear with devtools open are blocked
     source-map fetches from local bundle comments, not code loads.
-14. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
+15. Confirm the console has no `EvalError` and no blocked `blob:` script, and that
     `/login` still returns the strict CSP without `'unsafe-eval'`.
-15. Test backup and restore of the volume.
+16. Test backup and restore of the volume.
 
 ## 9. Boundaries
 

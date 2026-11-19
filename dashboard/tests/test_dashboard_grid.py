@@ -10,11 +10,11 @@ from transducer_dashboard.grid import (
     SceneGrid,
     chart_placeholder,
     grid_height,
-    grid_rows,
 )
 from transducer_dashboard.state import (
     GRID_COLUMNS,
     GRID_ROW_HEIGHT,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
 )
@@ -31,18 +31,13 @@ def make_figure(figure_id: str = "fig", title: str = "Untitled figure"):
     }
 
 
-def test_grid_rows_adds_working_room_below_the_figures() -> None:
-    assert grid_rows([]) == 6
-
-    figures = [make_figure()]
-    assert grid_rows(figures) == 6
-
-    figures[0]["layout"]["y"] = 8
-    assert grid_rows(figures) == 13
+def test_the_grid_is_a_fixed_number_of_rows() -> None:
+    assert GRID_ROWS == 6
 
 
 def test_grid_height_uses_the_configured_row_height() -> None:
-    assert grid_height(6) == 6 * GRID_ROW_HEIGHT
+    assert grid_height(GRID_ROWS) == GRID_ROWS * GRID_ROW_HEIGHT
+    assert grid_height() == GRID_ROWS * GRID_ROW_HEIGHT
 
 
 def test_the_grid_background_tracks_the_cell_size() -> None:
@@ -81,30 +76,97 @@ def test_scene_grid_uses_the_ribbon_as_the_drag_handle() -> None:
 
     assert "handle: '.figure-ribbon'" in render
     assert "float: true" in render
-    assert "getCellFromPixel" in render
-    assert "data.cell_click = JSON.stringify" in render
 
 
-def test_cell_click_reports_the_clicked_cell_and_resets() -> None:
+def test_scene_grid_starts_unlocked() -> None:
     grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
-    calls: list[tuple[int, int]] = []
-    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
 
-    grid.cell_click = json.dumps({"x": 4, "y": 2, "n": 1})
-
-    assert calls == [(4, 2)]
-    assert grid.cell_click == ""
+    assert grid.locked is False
 
 
-def test_cell_click_ignores_invalid_payloads() -> None:
+def test_the_lock_script_freezes_movement_and_resize() -> None:
+    lock_script = SceneGrid._scripts["locked"]
+    render = SceneGrid._scripts["render"]
+
+    assert "state.apply_lock(data.locked)" in lock_script
+    assert "gridstack.enableMove(!locked)" in render
+    assert "gridstack.enableResize(!locked)" in render
+    assert "td-mode-edit" in render
+    assert "td-mode-lock" in render
+
+
+def test_the_render_script_paints_a_free_span_while_unlocked() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "pointerdown" in render
+    assert "pointermove" in render
+    assert "pointerup" in render
+    assert "isAreaEmpty" in render
+    assert "data.figure_span = JSON.stringify" in render
+    assert "classList.toggle('td-mode-edit'" in render
+    assert "if (data.locked || pending || event.button !== 0)" in render
+    # Painting starts from the configured minimum, which is one cell.
+    assert "data.min_figure_width" in render
+    assert "data.min_figure_height" in render
+
+
+def test_the_paint_overlay_is_hidden_and_ignores_the_pointer() -> None:
+    assert ".grid-stack > .td-paint" in GRID_CSS
+    assert "pointer-events: none" in GRID_CSS
+    assert "display: none" in GRID_CSS
+
+
+def test_the_pending_placeholder_is_card_shaped() -> None:
+    assert ".grid-stack > .td-pending-figure" in GRID_CSS
+    assert ".td-pending-ribbon" in GRID_CSS
+    assert ".td-pending-body" in GRID_CSS
+    assert "animation: td-pending-pulse" in GRID_CSS
+    assert "pointer-events: none" in GRID_CSS
+
+
+def test_the_render_script_shows_a_pending_card_until_the_figure_arrives() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "td-pending-figure" in render
+    assert "Creating figure&hellip;" in render
+    assert "pending = true" in render
+    assert "show_pending(rect)" in render
+    assert "MutationObserver" in render
+    assert "node.classList.contains('grid-stack-item')" in render
+    assert "node.hasAttribute('data-id')" in render
+    assert "clear_pending()" in render
+    assert "15000" in render
+
+
+def test_the_render_script_ignores_gestures_while_a_figure_is_pending() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "if (data.locked || pending || event.button !== 0)" in render
+    assert "if (data.locked || pending)" in render
+    assert "if (!painting && !pending)" in render
+    assert "if (!pending)" in render
+
+
+def test_figure_span_reports_the_painted_span_and_resets() -> None:
     grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
-    calls: list[tuple[int, int]] = []
-    grid.set_cell_click_handler(lambda x, y: calls.append((x, y)))
+    calls: list[tuple[int, int, int, int]] = []
+    grid.set_figure_span_handler(lambda x, y, w, h: calls.append((x, y, w, h)))
 
-    grid.cell_click = "not-json"
+    grid.figure_span = json.dumps({"x": 2, "y": 1, "w": 5, "h": 4, "n": 1})
+
+    assert calls == [(2, 1, 5, 4)]
+    assert grid.figure_span == ""
+
+
+def test_figure_span_ignores_invalid_payloads() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
+    calls: list[tuple[int, int, int, int]] = []
+    grid.set_figure_span_handler(lambda x, y, w, h: calls.append((x, y, w, h)))
+
+    grid.figure_span = "not-json"
 
     assert calls == []
-    assert grid.cell_click == ""
+    assert grid.figure_span == ""
 
 
 def test_scene_grid_places_a_card_in_the_requested_cells() -> None:

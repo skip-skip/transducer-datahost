@@ -1,11 +1,11 @@
 """Grid canvas components for the Panel scene workspace.
 
-``SceneGrid`` extends Panel's ``GridStack`` with three additions:
+``SceneGrid`` extends Panel's ``GridStack`` with four additions:
 
 - the figure ribbon is the only drag handle;
-- figures have a minimum size of 3 x 2 cells;
-- clicking empty grid space reports the clicked cell back to Python through a
-  string parameter, so the shell can create a minimum-size figure there.
+- a lock toggle that freezes moving, resizing, and painting;
+- painting empty cells reports the painted span back to Python through a string
+  parameter, so the shell can create a figure there.
 
 ``FigureCard`` is the Panel view placed in each grid cell. Its ribbon button is
 both the selection control and the drag handle.
@@ -21,10 +21,13 @@ from typing import Any
 import panel as pn
 import param
 
-from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_WIDTH
-
-GRID_MIN_ROWS = 6
-GRID_EXTRA_ROWS = 3
+from .state import (
+    GRID_COLUMNS,
+    GRID_ROW_HEIGHT,
+    GRID_ROWS,
+    MIN_FIGURE_HEIGHT,
+    MIN_FIGURE_WIDTH,
+)
 
 GRID_BACKGROUND = "#f7f8fa"
 GRID_LINE = "#e2e6ec"
@@ -80,6 +83,51 @@ GRID_CSS = """
     var(--td-cell-height, {GRID_ROW_HEIGHT}px);
   box-shadow: inset -1px -1px 0 {GRID_LINE};
 }}
+.grid-stack.td-mode-edit {{ cursor: crosshair; user-select: none; }}
+.grid-stack.td-mode-edit .grid-stack-item {{ cursor: default; }}
+.grid-stack.td-mode-lock .grid-stack-item {{ cursor: default; }}
+.grid-stack.td-mode-lock .figure-ribbon {{ cursor: default; }}
+.grid-stack > .td-paint {{
+  position: absolute;
+  z-index: 0;
+  display: none;
+  box-sizing: border-box;
+  border: 2px dashed #1f6feb;
+  border-radius: 0.25rem;
+  background: rgba(31, 111, 235, 0.14);
+  pointer-events: none;
+}}
+.grid-stack > .td-pending-figure {{
+  position: absolute;
+  z-index: 1;
+  display: none;
+  flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
+  border: 1px solid #1f6feb;
+  border-radius: 0.35rem;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18);
+  pointer-events: none;
+  animation: td-pending-pulse 1.4s ease-in-out infinite;
+}}
+.grid-stack > .td-pending-figure .td-pending-ribbon {{
+  flex: 0 0 2rem;
+  border-bottom: 1px solid #d8dde6;
+  background: #eef2f7;
+}}
+.grid-stack > .td-pending-figure .td-pending-body {{
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: center;
+  color: #5b6472;
+  font-size: 0.85rem;
+}}
+@keyframes td-pending-pulse {{
+  0%, 100% {{ box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.18); }}
+  50% {{ box-shadow: 0 0 0 4px rgba(31, 111, 235, 0.08); }}
+}}
 """
 
 
@@ -130,6 +178,9 @@ class FigureCard(pn.Column):
         ribbon.on_click(handler)
         self._apply_classes()
 
+    def set_locked(self, locked: bool) -> None:
+        self.ribbon.disabled = locked
+
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
         self._apply_classes()
@@ -155,9 +206,17 @@ class FigureCard(pn.Column):
 
 
 class SceneGrid(pn.layout.GridStack):
-    """GridStack with ribbon-only dragging and an empty-cell click bridge."""
+    """GridStack with ribbon-only dragging and a layout lock."""
 
-    cell_click = param.String(default="")
+    locked = param.Boolean(
+        default=False,
+        doc="Freeze moving, resizing, painting, and figure selection.",
+    )
+
+    figure_span = param.String(
+        default="",
+        doc="JSON span painted on empty cells, consumed once by the shell.",
+    )
 
     min_figure_width = param.Integer(
         default=MIN_FIGURE_WIDTH, bounds=(1, None), doc="Minimum figure width."
@@ -206,14 +265,282 @@ class SceneGrid(pn.layout.GridStack):
             grid.style.setProperty('--td-cell-height', `${cell_height}px`);
           }
         }
+
+        const paint = document.createElement('div');
+        paint.className = 'td-paint';
+        grid.prepend(paint);
+
+        const pendingCard = document.createElement('div');
+        pendingCard.className = 'td-pending-figure';
+        pendingCard.innerHTML =
+          '<div class="td-pending-ribbon"></div>' +
+          '<div class="td-pending-body">Creating figure&hellip;</div>';
+        grid.prepend(pendingCard);
+
+        let paintAnchor = null;
+        let paintRect = null;
+        let painting = false;
+        let pending = false;
+        let pendingRect = null;
+
+        function cell_from_event(event) {
+          const cell = gridstack.getCellFromPixel(
+            {left: event.pageX, top: event.pageY}, true
+          );
+          if (!cell || !Number.isFinite(cell.x) || !Number.isFinite(cell.y)) {
+            return null;
+          }
+          if (cell.x < 0 || cell.x >= data.ncols) {
+            return null;
+          }
+          if (cell.y < 0 || cell.y >= data.nrows) {
+            return null;
+          }
+          return {x: cell.x, y: cell.y};
+        }
+
+        function area_is_free(x, y, w, h) {
+          if (x < 0 || y < 0 || x + w > data.ncols || y + h > data.nrows) {
+            return false;
+          }
+          return gridstack.isAreaEmpty(x, y, w, h);
+        }
+
+        function minimum_rect(cell) {
+          const w = data.min_figure_width;
+          const h = data.min_figure_height;
+          if (cell.x + w > data.ncols || cell.y + h > data.nrows) {
+            return null;
+          }
+          return area_is_free(cell.x, cell.y, w, h)
+            ? {x: cell.x, y: cell.y, w: w, h: h}
+            : null;
+        }
+
+        function grow_rect(anchor, cursor) {
+          let rect = minimum_rect(anchor);
+          if (!rect) {
+            return null;
+          }
+          const desired_w = Math.max(
+            data.min_figure_width, Math.abs(cursor.x - anchor.x) + 1
+          );
+          const desired_h = Math.max(
+            data.min_figure_height, Math.abs(cursor.y - anchor.y) + 1
+          );
+          const grow_left = cursor.x < anchor.x;
+          const grow_up = cursor.y < anchor.y;
+          while (rect.w < desired_w) {
+            const candidate = grow_left
+              ? {x: rect.x - 1, y: rect.y, w: rect.w + 1, h: rect.h}
+              : {x: rect.x, y: rect.y, w: rect.w + 1, h: rect.h};
+            if (!area_is_free(candidate.x, candidate.y, candidate.w, candidate.h)) {
+              break;
+            }
+            rect = candidate;
+          }
+          while (rect.h < desired_h) {
+            const candidate = grow_up
+              ? {x: rect.x, y: rect.y - 1, w: rect.w, h: rect.h + 1}
+              : {x: rect.x, y: rect.y, w: rect.w, h: rect.h + 1};
+            if (!area_is_free(candidate.x, candidate.y, candidate.w, candidate.h)) {
+              break;
+            }
+            rect = candidate;
+          }
+          return rect;
+        }
+
+        function show_paint(rect) {
+          if (!rect) {
+            paint.style.display = 'none';
+            paintRect = null;
+            return;
+          }
+          paintRect = rect;
+          const cell_width = gridstack.cellWidth();
+          const cell_height = gridstack.getCellHeight();
+          paint.style.left = `${rect.x * cell_width}px`;
+          paint.style.top = `${rect.y * cell_height}px`;
+          paint.style.width = `${rect.w * cell_width}px`;
+          paint.style.height = `${rect.h * cell_height}px`;
+          paint.style.display = 'block';
+        }
+
+        function clear_paint() {
+          paint.style.display = 'none';
+          paintRect = null;
+          paintAnchor = null;
+          painting = false;
+        }
+
+        function show_pending(rect) {
+          if (!rect) {
+            pendingCard.style.display = 'none';
+            pendingRect = null;
+            return;
+          }
+          pendingRect = rect;
+          const cell_width = gridstack.cellWidth();
+          const cell_height = gridstack.getCellHeight();
+          pendingCard.style.left = `${rect.x * cell_width}px`;
+          pendingCard.style.top = `${rect.y * cell_height}px`;
+          pendingCard.style.width = `${rect.w * cell_width}px`;
+          pendingCard.style.height = `${rect.h * cell_height}px`;
+          pendingCard.style.display = 'flex';
+        }
+
+        function clear_pending() {
+          pending = false;
+          pendingRect = null;
+          pendingCard.style.display = 'none';
+          if (state.pending_timeout) {
+            clearTimeout(state.pending_timeout);
+            state.pending_timeout = null;
+          }
+        }
+
+        function arm_pending_timeout() {
+          if (state.pending_timeout) {
+            clearTimeout(state.pending_timeout);
+          }
+          state.pending_timeout = setTimeout(() => {
+            if (pending) {
+              clear_pending();
+            }
+          }, 15000);
+        }
+
         state.sync_cell_size = sync_cell_size;
         sync_cell_size();
         if (typeof ResizeObserver !== 'undefined') {
           if (state.cell_resize_observer) {
             state.cell_resize_observer.disconnect();
           }
-          state.cell_resize_observer = new ResizeObserver(sync_cell_size);
+          state.cell_resize_observer = new ResizeObserver(() => {
+            sync_cell_size();
+            if (paintRect) {
+              show_paint(paintRect);
+            }
+            if (pendingRect) {
+              show_pending(pendingRect);
+            }
+          });
           state.cell_resize_observer.observe(grid);
+        }
+
+        function apply_lock(locked) {
+          gridstack.enableMove(!locked);
+          gridstack.enableResize(!locked);
+          grid.classList.toggle('td-mode-edit', !locked);
+          grid.classList.toggle('td-mode-lock', locked);
+          if (locked) {
+            clear_paint();
+            clear_pending();
+          }
+        }
+        state.apply_lock = apply_lock;
+        apply_lock(data.locked);
+
+        grid.addEventListener('pointerdown', (event) => {
+          if (data.locked || pending || event.button !== 0) {
+            return;
+          }
+          if (event.target.closest('.grid-stack-item')) {
+            return;
+          }
+          const cell = cell_from_event(event);
+          if (!cell) {
+            return;
+          }
+          const rect = minimum_rect(cell);
+          if (!rect) {
+            return;
+          }
+          paintAnchor = cell;
+          painting = true;
+          show_paint(rect);
+          event.preventDefault();
+          if (grid.setPointerCapture) {
+            grid.setPointerCapture(event.pointerId);
+          }
+        });
+
+        grid.addEventListener('pointermove', (event) => {
+          if (data.locked || pending) {
+            return;
+          }
+          if (painting && paintAnchor) {
+            const cell = cell_from_event(event);
+            if (cell) {
+              show_paint(grow_rect(paintAnchor, cell));
+            }
+            return;
+          }
+          if (event.target.closest('.grid-stack-item')) {
+            show_paint(null);
+            return;
+          }
+          const cell = cell_from_event(event);
+          show_paint(cell ? minimum_rect(cell) : null);
+        });
+
+        grid.addEventListener('pointerup', (event) => {
+          if (!painting) {
+            return;
+          }
+          const rect = paintRect;
+          painting = false;
+          paintAnchor = null;
+          clear_paint();
+          if (rect) {
+            pending = true;
+            show_pending(rect);
+            arm_pending_timeout();
+            data.figure_span = JSON.stringify({
+              x: rect.x, y: rect.y, w: rect.w, h: rect.h, n: Date.now()
+            });
+          }
+          if (grid.releasePointerCapture) {
+            try {
+              grid.releasePointerCapture(event.pointerId);
+            } catch (error) {
+              // The pointer may already be released.
+            }
+          }
+        });
+
+        grid.addEventListener('pointercancel', () => {
+          if (!pending) {
+            clear_paint();
+          }
+        });
+
+        grid.addEventListener('pointerleave', () => {
+          if (!painting && !pending) {
+            clear_paint();
+          }
+        });
+
+        if (typeof MutationObserver !== 'undefined') {
+          const figureObserver = new MutationObserver((mutations) => {
+            if (!pending) {
+              return;
+            }
+            for (const mutation of mutations) {
+              for (const node of mutation.addedNodes) {
+                if (
+                  node.nodeType === 1 &&
+                  node.classList.contains('grid-stack-item') &&
+                  node.hasAttribute('data-id')
+                ) {
+                  clear_pending();
+                  return;
+                }
+              }
+            }
+          });
+          figureObserver.observe(grid, {childList: true, subtree: true});
         }
         function sync_state(load=false) {
           const items = []
@@ -226,43 +553,13 @@ class SceneGrid(pn.layout.GridStack):
           }
           data.state = items
         }
-        let dragStart = null
-        let dragged = false
-        gridstack.on('dragstart', (event, el) => {
-          const node = el ? el.gridstackNode : null
-          dragStart = node ? {x: node.x, y: node.y} : null
-        })
         gridstack.on('dragstop', (event, el) => {
-          const node = el ? el.gridstackNode : null
-          dragged = !!(dragStart && node && (node.x !== dragStart.x || node.y !== dragStart.y))
-          dragStart = null
           sync_state()
-          if (dragged) {
-            setTimeout(() => { dragged = false }, 250)
-          }
         })
         gridstack.on('resizestop', (event, el) => {
           sync_state()
           view.invalidate_layout()
         })
-        grid.addEventListener('click', (event) => {
-          if (dragged && event.target.closest('.figure-ribbon')) {
-            event.stopPropagation()
-            event.preventDefault()
-            return
-          }
-          if (event.target.closest('.grid-stack-item')) {
-            return
-          }
-          const cell = gridstack.getCellFromPixel({left: event.pageX, top: event.pageY}, true)
-          if (!cell || !Number.isFinite(cell.x) || !Number.isFinite(cell.y)) {
-            return
-          }
-          if (cell.x < 0 || cell.x >= data.ncols || cell.y < 0 || cell.y >= data.nrows) {
-            return
-          }
-          data.cell_click = JSON.stringify({x: cell.x, y: cell.y, n: Date.now()})
-        }, true)
         sync_state()
         state.gridstack = gridstack
         state.init = false
@@ -278,43 +575,42 @@ class SceneGrid(pn.layout.GridStack):
           state.sync_cell_size()
         }
         """,
+        "locked": """
+        if (state.apply_lock) {
+          state.apply_lock(data.locked)
+        }
+        """,
     }
 
     def __init__(self, **params: Any) -> None:
         super().__init__(**params)
-        self._cell_click_handler: Callable[[int, int], Any] | None = None
+        self._figure_span_handler: Callable[[int, int, int, int], Any] | None = None
 
-    def set_cell_click_handler(self, handler: Callable[[int, int], Any]) -> None:
-        self._cell_click_handler = handler
+    def set_figure_span_handler(
+        self, handler: Callable[[int, int, int, int], Any]
+    ) -> None:
+        self._figure_span_handler = handler
 
-    @param.depends("cell_click", watch=True)
-    def _process_cell_click(self) -> None:
-        raw = self.cell_click
+    @param.depends("figure_span", watch=True)
+    def _process_figure_span(self) -> None:
+        raw = self.figure_span
         if not raw:
             return
-        self.cell_click = ""
+        self.figure_span = ""
         try:
             payload = json.loads(raw)
             x = int(payload["x"])
             y = int(payload["y"])
+            width = int(payload["w"])
+            height = int(payload["h"])
         except (KeyError, TypeError, ValueError, json.JSONDecodeError):
             return
-        handler = getattr(self, "_cell_click_handler", None)
+        handler = getattr(self, "_figure_span_handler", None)
         if handler is not None:
-            handler(x, y)
+            handler(x, y, width, height)
 
 
-def grid_rows(figures: list[dict[str, Any]]) -> int:
-    """Return the row count needed for the figures plus empty working room."""
-
-    lowest = max(
-        (figure["layout"]["y"] + figure["layout"]["h"] for figure in figures),
-        default=0,
-    )
-    return max(GRID_MIN_ROWS, lowest + GRID_EXTRA_ROWS)
-
-
-def grid_height(rows: int) -> int:
+def grid_height(rows: int = GRID_ROWS) -> int:
     return rows * GRID_ROW_HEIGHT
 
 
@@ -323,13 +619,11 @@ __all__ = [
     "GRID_BACKGROUND",
     "GRID_COLUMNS",
     "GRID_CSS",
-    "GRID_EXTRA_ROWS",
     "GRID_LINE",
-    "GRID_MIN_ROWS",
+    "GRID_ROWS",
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",
     "SceneGrid",
     "chart_placeholder",
     "grid_height",
-    "grid_rows",
 ]

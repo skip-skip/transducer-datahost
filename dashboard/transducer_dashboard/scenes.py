@@ -12,8 +12,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .state import (
+    DEFAULT_FIGURE_HEIGHT,
+    DEFAULT_FIGURE_WIDTH,
     DEFAULT_RANGE,
     GRID_COLUMNS,
+    GRID_ROWS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
     RANGES,
@@ -163,18 +166,16 @@ def _cell_is_free(
 
 def find_free_slot(
     figures: list[dict[str, Any]],
-    width: int = MIN_FIGURE_WIDTH,
-    height: int = MIN_FIGURE_HEIGHT,
+    width: int = DEFAULT_FIGURE_WIDTH,
+    height: int = DEFAULT_FIGURE_HEIGHT,
 ) -> tuple[int, int] | None:
     """Return the first free cell that fits a figure, scanning top to bottom."""
 
     if width > GRID_COLUMNS or width < MIN_FIGURE_WIDTH or height < MIN_FIGURE_HEIGHT:
         return None
-    lowest = max(
-        (figure["layout"]["y"] + figure["layout"]["h"] for figure in figures),
-        default=0,
-    )
-    for y in range(0, lowest + 1):
+    if height > GRID_ROWS:
+        return None
+    for y in range(0, GRID_ROWS - height + 1):
         for x in range(0, GRID_COLUMNS - width + 1):
             if _cell_is_free(figures, x, y, width, height):
                 return x, y
@@ -189,6 +190,8 @@ def add_figure(
     *,
     range_key: str = DEFAULT_RANGE,
 ) -> dict[str, Any]:
+    """Add a default-size figure at the cell, falling back to the first free slot."""
+
     scene = get_scene(state, scene_id)
     if range_key not in RANGES:
         raise SceneError(f"unknown range {range_key!r}")
@@ -200,14 +203,63 @@ def add_figure(
         raise SceneError(f"x must be less than {GRID_COLUMNS}")
 
     figures = scene.setdefault("figures", [])
-    width = MIN_FIGURE_WIDTH
-    height = MIN_FIGURE_HEIGHT
-    if x + width > GRID_COLUMNS or not _cell_is_free(figures, x, y, width, height):
+    width = DEFAULT_FIGURE_WIDTH
+    height = DEFAULT_FIGURE_HEIGHT
+    if (
+        x + width > GRID_COLUMNS
+        or y + height > GRID_ROWS
+        or not _cell_is_free(figures, x, y, width, height)
+    ):
         slot = find_free_slot(figures, width, height)
         if slot is None:
             raise SceneFull("the scene has no room for another figure")
         x, y = slot
 
+    return _append_figure(scene, x, y, width, height, range_key)
+
+
+def add_figure_at(
+    state: dict[str, Any],
+    scene_id: str,
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    *,
+    range_key: str = DEFAULT_RANGE,
+) -> dict[str, Any]:
+    """Add a figure with the exact layout the user painted."""
+
+    scene = get_scene(state, scene_id)
+    if range_key not in RANGES:
+        raise SceneError(f"unknown range {range_key!r}")
+    if isinstance(x, bool) or not isinstance(x, int) or x < 0:
+        raise SceneError("x must be a non-negative integer")
+    if isinstance(y, bool) or not isinstance(y, int) or y < 0:
+        raise SceneError("y must be a non-negative integer")
+    if isinstance(width, bool) or not isinstance(width, int) or width < MIN_FIGURE_WIDTH:
+        raise SceneError(f"w must be at least {MIN_FIGURE_WIDTH}")
+    if isinstance(height, bool) or not isinstance(height, int) or height < MIN_FIGURE_HEIGHT:
+        raise SceneError(f"h must be at least {MIN_FIGURE_HEIGHT}")
+    if x + width > GRID_COLUMNS:
+        raise SceneError(f"x + w must not exceed {GRID_COLUMNS}")
+    if y + height > GRID_ROWS:
+        raise SceneError(f"y + h must not exceed {GRID_ROWS}")
+
+    figures = scene.setdefault("figures", [])
+    if not _cell_is_free(figures, x, y, width, height):
+        raise SceneError("the selected cells are already occupied")
+    return _append_figure(scene, x, y, width, height, range_key)
+
+
+def _append_figure(
+    scene: dict[str, Any],
+    x: int,
+    y: int,
+    width: int,
+    height: int,
+    range_key: str,
+) -> dict[str, Any]:
     now = _now()
     figure = {
         "id": new_id(),
@@ -219,7 +271,7 @@ def add_figure(
         "created_at": now,
         "updated_at": now,
     }
-    figures.append(figure)
+    scene.setdefault("figures", []).append(figure)
     scene["updated_at"] = now
     return figure
 

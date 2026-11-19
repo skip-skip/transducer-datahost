@@ -33,13 +33,13 @@ from .grid import (
     SceneGrid,
     chart_placeholder,
     grid_height,
-    grid_rows,
 )
 from .read_client import ReadApiError, ReadClient
 from .settings import DashboardSettings
 from .state import (
     DEFAULT_RANGE,
     GRID_COLUMNS,
+    GRID_ROWS,
     RANGES,
     StateError,
     StateStore,
@@ -87,11 +87,11 @@ MUTED_STYLE = "color:#5b6472;"
 NOTICE_CSS = """
 :host {
   position: fixed;
-  right: 1rem;
+  right: 7.5rem;
   bottom: 1rem;
   z-index: 9999;
   width: auto;
-  max-width: min(28rem, calc(100vw - 2rem));
+  max-width: min(28rem, calc(100vw - 9rem));
   pointer-events: none;
 }
 .td-notice {
@@ -108,6 +108,19 @@ NOTICE_CSS = """
 @keyframes td-notice-dismiss {
   0%, 85% { opacity: 1; }
   100% { opacity: 0; visibility: hidden; }
+}
+"""
+
+# The lock toggle is fixed to the viewport, like the notice, so it overlays the
+# grid instead of taking layout space. The notice sits to its left.
+LOCK_CSS = """
+:host {
+  position: fixed;
+  right: 1rem;
+  bottom: 1rem;
+  z-index: 9000;
+  width: max-content !important;
+  height: auto !important;
 }
 """
 
@@ -235,6 +248,7 @@ class DashboardShell:
         self._tray_collapsed = False
         self._settings_collapsed = False
         self._delete_confirm = False
+        self._locked = False
 
         # Session-local drafts keyed by figure ID. A draft holds only the
         # settings fields the user has changed, so publishing writes just those
@@ -249,6 +263,8 @@ class DashboardShell:
         self.confirm_delete_button: pn.widgets.Button | None = None
         self.cancel_delete_button: pn.widgets.Button | None = None
         self.notice: pn.pane.HTML
+        self.lock_control: pn.Column
+        self.lock_button: pn.widgets.Button
         self.header: pn.pane.HTML | None = None
         self._grid: SceneGrid | None = None
         self._figure_cards: dict[str, FigureCard] = {}
@@ -295,6 +311,7 @@ class DashboardShell:
             stylesheets=[NOTICE_CSS],
             margin=0,
         )
+        self.lock_control = self._build_lock_control()
 
         self._load()
         self.refresh()
@@ -312,6 +329,10 @@ class DashboardShell:
     @property
     def selected_figure_id(self) -> str | None:
         return self._selected_figure_id
+
+    @property
+    def locked(self) -> bool:
+        return self._locked
 
     @property
     def tray_collapsed(self) -> bool:
@@ -508,7 +529,7 @@ class DashboardShell:
 
     def select_figure(self, figure_id: str, event: Any = None) -> None:
         scene_id = self._selected_scene_id
-        if scene_id is None:
+        if scene_id is None or self._locked:
             return
         label = self.session.label
 
@@ -541,7 +562,7 @@ class DashboardShell:
 
     def create_figure(self, x: int, y: int) -> dict[str, Any] | None:
         scene_id = self._selected_scene_id
-        if scene_id is None:
+        if scene_id is None or self._locked:
             return None
         label = self.session.label
 
@@ -563,11 +584,100 @@ class DashboardShell:
             self._recover(str(exc))
             return None
 
+        self._refresh_after_create(figure)
+        return figure
+
+    def create_figure_span(
+        self, x: int, y: int, width: int, height: int
+    ) -> dict[str, Any] | None:
+        """Create a figure with the exact span painted on the canvas."""
+
+        scene_id = self._selected_scene_id
+        if scene_id is None or self._locked:
+            return None
+        label = self.session.label
+
+        def operation(data: dict[str, Any]) -> dict[str, Any]:
+            figure = scenes.add_figure_at(
+                data,
+                scene_id,
+                x,
+                y,
+                width,
+                height,
+                range_key=self._default_range(),
+            )
+            scenes.set_ui(
+                data,
+                label,
+                selected_scene_id=scene_id,
+                selected_figure_id=figure["id"],
+            )
+            return figure
+
+        try:
+            self._state, figure = self.store.mutate(operation)
+        except (scenes.SceneError, StateError) as exc:
+            self._recover(str(exc))
+            return None
+
+        self._refresh_after_create(figure)
+        return figure
+
+    def _refresh_after_create(self, figure: dict[str, Any]) -> None:
+        """Show a new figure without rebuilding the whole shell."""
+
         self._selected_figure_id = figure["id"]
         self._delete_confirm = False
         self._clear_notice()
-        self.refresh()
-        return figure
+        if not self._append_figure_card(figure):
+            self._rebuild_canvas()
+            return
+        self._view.objects = [self._render_header(), *self._view.objects[1:]]
+        self._update_selection()
+        self._schedule_figure_chart_load(figure["id"])
+
+    def _append_figure_card(self, figure: dict[str, Any]) -> bool:
+        """Add the card to the live grid without rebuilding it."""
+
+        if self._grid is None or self._selected_scene_id is None:
+            return False
+        scene = scenes.find_scene(self._state, self._selected_scene_id)
+        if scene is None:
+            return False
+        display = dict(self._effective_figure(figure))
+        display["title"] = self._figure_title(display)
+        card = FigureCard(display, on_select=self.select_figure)
+        card.set_selected(figure["id"] == self._selected_figure_id)
+        card.set_unpublished(figure["id"] in self._drafts)
+        card.set_locked(self._locked)
+        layout = figure["layout"]
+        self._grid[
+            layout["y"] : layout["y"] + layout["h"],
+            layout["x"] : layout["x"] + layout["w"],
+        ] = card
+        self._figure_cards[figure["id"]] = card
+        self._grid_figure_ids[str(id(card))] = figure["id"]
+        return True
+
+    def _rebuild_canvas(self) -> None:
+        """Fall back to a canvas-only rebuild when no live grid can be used."""
+
+        objects = list(self._view.objects)
+        if len(objects) < 2 or not isinstance(objects[1], pn.Row):
+            self.refresh()
+            return
+        row = objects[1]
+        if len(row.objects) < 2:
+            self.refresh()
+            return
+        row.objects = [row.objects[0], self._render_canvas()]
+        objects[0] = self._render_header()
+        self._view.objects = objects
+        self._update_selection()
+
+    def _schedule_figure_chart_load(self, figure_id: str) -> None:
+        pn.state.execute(lambda: self._refresh_figure_chart(figure_id))
 
     def _on_grid_state(self, event: Any) -> None:
         self.apply_grid_state(event.new or [])
@@ -756,6 +866,43 @@ class DashboardShell:
         if self.settings_body is not None:
             self._fill_settings()
 
+    # -- layout lock -------------------------------------------------------
+
+    def _build_lock_control(self) -> pn.Column:
+        self.lock_button = pn.widgets.Button(
+            label="Lock",
+            css_classes=["td-lock-button"],
+            margin=0,
+            styles={
+                "border-radius": "999px",
+                "padding": "0.45rem 0.9rem",
+                "font-weight": "600",
+                "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.16)",
+            },
+        )
+        self.lock_button.on_click(self._on_lock_toggle)
+        return pn.Column(
+            self.lock_button,
+            stylesheets=[LOCK_CSS],
+            margin=0,
+        )
+
+    def _on_lock_toggle(self, event: Any) -> None:
+        self.set_locked(not self._locked)
+
+    def _refresh_lock(self) -> None:
+        self.lock_button.disabled = self._selected_scene_id is None
+        self.lock_button.label = "Unlock" if self._locked else "Lock"
+        self.lock_button.button_type = "warning" if self._locked else "light"
+
+    def set_locked(self, locked: bool) -> None:
+        self._locked = bool(locked)
+        self._refresh_lock()
+        if self._grid is not None:
+            self._grid.locked = self._locked
+        for card in self._figure_cards.values():
+            card.set_locked(self._locked)
+
     # -- notices -----------------------------------------------------------
 
     def _notify(self, message: str, *, error: bool = False) -> None:
@@ -797,6 +944,7 @@ class DashboardShell:
         self.settings_card = None
         self.settings_body = None
         self.rail = None
+        self._refresh_lock()
         self._view.objects = [
             self._render_header(),
             pn.Row(
@@ -807,6 +955,7 @@ class DashboardShell:
             ),
             self.conflict_modal,
             self.notice,
+            self.lock_control,
         ]
 
     def _render_header(self) -> pn.pane.HTML:
@@ -992,16 +1141,19 @@ class DashboardShell:
                 "min-height": "0",
                 "overflow-y": "auto",
                 "background": GRID_BACKGROUND,
+                "padding-bottom": "5rem",
             },
         )
 
     def _render_grid(self, scene: dict[str, Any]) -> pn.Column:
         figures = scene["figures"]
-        rows = grid_rows(figures)
+        rows = GRID_ROWS
         grid = SceneGrid(
             ncols=GRID_COLUMNS,
             nrows=rows,
-            sizing_mode="stretch_both",
+            locked=self._locked,
+            height=grid_height(rows),
+            sizing_mode="stretch_width",
             css_classes=["scene-grid"],
             stylesheets=[GRID_CSS],
         )
@@ -1013,6 +1165,7 @@ class DashboardShell:
             card = FigureCard(display, on_select=self.select_figure)
             card.set_selected(figure["id"] == self._selected_figure_id)
             card.set_unpublished(figure["id"] in self._drafts)
+            card.set_locked(self._locked)
             layout = figure["layout"]
             grid[
                 layout["y"] : layout["y"] + layout["h"],
@@ -1020,8 +1173,8 @@ class DashboardShell:
             ] = card
             cards[figure["id"]] = card
 
-        grid.set_cell_click_handler(self.create_figure)
         grid.param.watch(self._on_grid_state, "state")
+        grid.set_figure_span_handler(self.create_figure_span)
         self._grid = grid
         self._figure_cards = cards
         self._grid_figure_ids = {

@@ -36,9 +36,14 @@ LOCK_FILENAME = ".state.lock"
 
 # Grid configuration for the MVP. Per-scene grids are a follow-up.
 GRID_COLUMNS = 12
+GRID_ROWS = 6
 GRID_ROW_HEIGHT = 220
-MIN_FIGURE_WIDTH = 3
-MIN_FIGURE_HEIGHT = 2
+MIN_FIGURE_WIDTH = 1
+MIN_FIGURE_HEIGHT = 1
+# Non-interactive callers (demo fixtures, scripts) still get a readable figure.
+# The canvas creates whatever span the user paints, down to one cell.
+DEFAULT_FIGURE_WIDTH = 3
+DEFAULT_FIGURE_HEIGHT = 2
 
 RANGES = ("24h", "7d", "30d")
 DEFAULT_RANGE = "7d"
@@ -140,6 +145,8 @@ def validate_layout(layout: Any, where: str = "layout") -> None:
         raise StateError(f"{where}.h must be at least {MIN_FIGURE_HEIGHT}")
     if x + width > GRID_COLUMNS:
         raise StateError(f"{where} must fit within {GRID_COLUMNS} columns")
+    if y + height > GRID_ROWS:
+        raise StateError(f"{where} must fit within {GRID_ROWS} rows")
 
 
 def _validate_figure(figure: Any, where: str) -> None:
@@ -208,6 +215,50 @@ def _is_legacy_v2(data: Mapping[Any, Any]) -> bool:
         and "scenes" not in data
         and "ui" not in data
     )
+
+
+def _fit_layout_rows(data: dict[str, Any]) -> bool:
+    """Pull legacy layouts into the fixed grid instead of rejecting them.
+
+    Earlier versions let the grid grow with the figures. A document from one of
+    those versions may contain figures below ``GRID_ROWS``. Move each one up
+    into the fixed canvas, shrinking it only when it is taller than the whole
+    grid, and write the normalized document back.
+    """
+
+    changed = False
+    scenes = data.get("scenes")
+    if not isinstance(scenes, list):
+        return False
+    for scene in scenes:
+        if not isinstance(scene, dict):
+            continue
+        figures = scene.get("figures")
+        if not isinstance(figures, list):
+            continue
+        for figure in figures:
+            if not isinstance(figure, dict):
+                continue
+            layout = figure.get("layout")
+            if not isinstance(layout, dict):
+                continue
+            y = layout.get("y")
+            height = layout.get("h")
+            if (
+                isinstance(y, bool)
+                or not isinstance(y, int)
+                or isinstance(height, bool)
+                or not isinstance(height, int)
+                or y < 0
+                or height < 1
+                or y + height <= GRID_ROWS
+            ):
+                continue
+            fitted_height = min(height, GRID_ROWS)
+            layout["h"] = fitted_height
+            layout["y"] = GRID_ROWS - fitted_height
+            changed = True
+    return changed
 
 
 def validate_state(data: Any) -> dict[str, Any]:
@@ -301,6 +352,8 @@ class StateStore:
             fresh = default_state()
             self._write_unlocked(fresh)
             return fresh
+        if _fit_layout_rows(data):
+            self._write_unlocked(data)
         return validate_state(data)
 
     def _read_unlocked(self) -> dict[str, Any]:

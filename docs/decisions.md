@@ -638,8 +638,9 @@ inside the existing FastAPI service.
   token may create/delete scenes and edit figures.
 - A version 1 state file is archived as `state.v1.json` and replaced with an empty
   version 2 document. Personal figures are not published into shared scenes.
-- The grid is fixed at 12 columns and 220 px rows. Figures have a minimum size of
-  3 x 2 cells.
+- The grid is fixed at 12 columns, 6 rows, and 220 px rows. It never grows when
+  figures are created and only scales in width with the browser. Figures have a
+  minimum size of one cell, so a painted footprint can be 1 x 1.
 - Only time-series figures are implemented. Charts use Bokeh directly through
   `pn.pane.Bokeh`.
 - The Jinja templates, HTMX, Plotly, and vendored GridStack assets are removed. No Node

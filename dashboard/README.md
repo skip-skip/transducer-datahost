@@ -21,13 +21,16 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
   unpublished figure drafts are per session and are not stored.
 
 Scenes are shared between all users; there are no personal scenes. The grid is
-12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
+12 columns wide with 220 px rows, and a figure can be as small as one cell.
 
-In the browser, click an empty grid cell to add a figure, click its title ribbon
-to select it, and drag the ribbon to move it. Layout changes are saved
-immediately to the shared state. The settings drawer opens only from its tab;
-selecting or creating a figure updates its contents without changing whether it
-is open.
+In the browser, the bottom-right **Lock** button freezes the layout; **Unlock**
+restores editing. While unlocked, figures move and resize, and painting an empty
+rectangle creates a figure. Click a figure's title ribbon to select it, and drag
+the ribbon or its lower-right corner. Locking also disables selection. The lock
+is per session and resets to unlocked on reload. Layout changes are saved
+immediately to the shared state. The settings drawer opens only from its
+tab; selecting or creating a figure updates its contents without changing
+whether it is open.
 
 The header banner shows the brand on the left, the selected scene name and figure
 count in the center, and the signed-in user with Sign out on the right. The
