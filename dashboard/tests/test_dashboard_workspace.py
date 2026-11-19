@@ -1,3 +1,4 @@
+import json
 from datetime import datetime
 from typing import Any
 
@@ -604,6 +605,63 @@ def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
         "h": 2,
     }
     assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
+
+
+def test_painting_a_span_creates_a_figure_with_that_layout(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_tool_mode("add")
+
+    figure = shell.create_figure_span(2, 1, 5, 4)
+
+    assert figure is not None
+    assert figure["layout"] == {"x": 2, "y": 1, "w": 5, "h": 4}
+    assert shell.selected_figure_id == figure["id"]
+    assert shell.figure_cards[figure["id"]].ribbon.label == "Untitled figure"
+
+    stored = store.load()
+    assert stored["scenes"][0]["figures"][0]["layout"] == {
+        "x": 2,
+        "y": 1,
+        "w": 5,
+        "h": 4,
+    }
+    assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
+
+
+def test_the_grid_paint_bridge_creates_the_painted_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_tool_mode("add")
+    assert shell.grid is not None
+
+    shell.grid.figure_span = json.dumps({"x": 6, "y": 2, "w": 3, "h": 3, "n": 1})
+
+    stored = store.load()
+    figures = stored["scenes"][0]["figures"]
+    assert len(figures) == 1
+    assert figures[0]["layout"] == {"x": 6, "y": 2, "w": 3, "h": 3}
+    assert shell.selected_figure_id == figures[0]["id"]
+
+
+def test_painting_is_ignored_outside_add_mode(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_tool_mode("arrange")
+
+    assert shell.create_figure_span(2, 1, 5, 4) is None
+    assert store.load()["scenes"][0]["figures"] == []
+
+
+def test_painting_over_an_occupied_span_is_rejected(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_tool_mode("add")
+    first = shell.create_figure_span(0, 0, 3, 2)
+
+    assert first is not None
+    assert shell.create_figure_span(1, 1, 3, 2) is None
+    assert len(shell.figure_cards) == 1
 
 
 def test_a_figure_falls_back_to_the_first_free_slot(tmp_path) -> None:

@@ -600,6 +600,46 @@ class DashboardShell:
         self.refresh()
         return figure
 
+    def create_figure_span(
+        self, x: int, y: int, width: int, height: int
+    ) -> dict[str, Any] | None:
+        """Create a figure with the exact span painted in Add mode."""
+
+        scene_id = self._selected_scene_id
+        if scene_id is None or self._tool_mode != "add":
+            return None
+        label = self.session.label
+
+        def operation(data: dict[str, Any]) -> dict[str, Any]:
+            figure = scenes.add_figure_at(
+                data,
+                scene_id,
+                x,
+                y,
+                width,
+                height,
+                range_key=self._default_range(),
+            )
+            scenes.set_ui(
+                data,
+                label,
+                selected_scene_id=scene_id,
+                selected_figure_id=figure["id"],
+            )
+            return figure
+
+        try:
+            self._state, figure = self.store.mutate(operation)
+        except (scenes.SceneError, StateError) as exc:
+            self._recover(str(exc))
+            return None
+
+        self._selected_figure_id = figure["id"]
+        self._delete_confirm = False
+        self._clear_notice()
+        self.refresh()
+        return figure
+
     def _on_grid_state(self, event: Any) -> None:
         self.apply_grid_state(event.new or [])
 
@@ -1114,6 +1154,7 @@ class DashboardShell:
             cards[figure["id"]] = card
 
         grid.param.watch(self._on_grid_state, "state")
+        grid.set_figure_span_handler(self.create_figure_span)
         self._grid = grid
         self._figure_cards = cards
         self._grid_figure_ids = {

@@ -1,11 +1,12 @@
 """Grid canvas components for the Panel scene workspace.
 
-``SceneGrid`` extends Panel's ``GridStack`` with three additions:
+``SceneGrid`` extends Panel's ``GridStack`` with four additions:
 
 - the figure ribbon is the only drag handle;
 - figures have a minimum size of 3 x 2 cells;
-- clicking empty grid space reports the clicked cell back to Python through a
-  string parameter, so the shell can create a minimum-size figure there.
+- a canvas tool mode that toggles moving and resizing;
+- painting empty cells in Add mode reports the painted span back to Python
+  through a string parameter, so the shell can create a figure there.
 
 ``FigureCard`` is the Panel view placed in each grid cell. Its ribbon button is
 both the selection control and the drag handle.
@@ -13,6 +14,7 @@ both the selection control and the drag handle.
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 from html import escape
 from typing import Any
@@ -85,6 +87,16 @@ GRID_CSS = """
 .grid-stack.td-mode-add {{ cursor: crosshair; user-select: none; }}
 .grid-stack.td-mode-add .grid-stack-item {{ cursor: default; }}
 .grid-stack.td-mode-lock .grid-stack-item {{ cursor: default; }}
+.grid-stack > .td-paint {{
+  position: absolute;
+  z-index: 0;
+  display: none;
+  box-sizing: border-box;
+  border: 2px dashed #1f6feb;
+  border-radius: 0.25rem;
+  background: rgba(31, 111, 235, 0.14);
+  pointer-events: none;
+}}
 """
 
 
@@ -168,6 +180,11 @@ class SceneGrid(pn.layout.GridStack):
         doc="Canvas tool: add figures, arrange them, or lock the layout.",
     )
 
+    figure_span = param.String(
+        default="",
+        doc="JSON span painted in Add mode, consumed once by the shell.",
+    )
+
     min_figure_width = param.Integer(
         default=MIN_FIGURE_WIDTH, bounds=(1, None), doc="Minimum figure width."
     )
@@ -215,25 +232,208 @@ class SceneGrid(pn.layout.GridStack):
             grid.style.setProperty('--td-cell-height', `${cell_height}px`);
           }
         }
+
+        const paint = document.createElement('div');
+        paint.className = 'td-paint';
+        grid.prepend(paint);
+        let paintAnchor = null;
+        let paintRect = null;
+        let painting = false;
+
+        function cell_from_event(event) {
+          const cell = gridstack.getCellFromPixel(
+            {left: event.pageX, top: event.pageY}, true
+          );
+          if (!cell || !Number.isFinite(cell.x) || !Number.isFinite(cell.y)) {
+            return null;
+          }
+          if (cell.x < 0 || cell.x >= data.ncols) {
+            return null;
+          }
+          if (cell.y < 0 || cell.y >= data.nrows) {
+            return null;
+          }
+          return {x: cell.x, y: cell.y};
+        }
+
+        function area_is_free(x, y, w, h) {
+          if (x < 0 || y < 0 || x + w > data.ncols || y + h > data.nrows) {
+            return false;
+          }
+          return gridstack.isAreaEmpty(x, y, w, h);
+        }
+
+        function minimum_rect(cell) {
+          const w = data.min_figure_width;
+          const h = data.min_figure_height;
+          if (cell.x + w > data.ncols || cell.y + h > data.nrows) {
+            return null;
+          }
+          return area_is_free(cell.x, cell.y, w, h)
+            ? {x: cell.x, y: cell.y, w: w, h: h}
+            : null;
+        }
+
+        function grow_rect(anchor, cursor) {
+          let rect = minimum_rect(anchor);
+          if (!rect) {
+            return null;
+          }
+          const desired_w = Math.max(
+            data.min_figure_width, Math.abs(cursor.x - anchor.x) + 1
+          );
+          const desired_h = Math.max(
+            data.min_figure_height, Math.abs(cursor.y - anchor.y) + 1
+          );
+          const grow_left = cursor.x < anchor.x;
+          const grow_up = cursor.y < anchor.y;
+          while (rect.w < desired_w) {
+            const candidate = grow_left
+              ? {x: rect.x - 1, y: rect.y, w: rect.w + 1, h: rect.h}
+              : {x: rect.x, y: rect.y, w: rect.w + 1, h: rect.h};
+            if (!area_is_free(candidate.x, candidate.y, candidate.w, candidate.h)) {
+              break;
+            }
+            rect = candidate;
+          }
+          while (rect.h < desired_h) {
+            const candidate = grow_up
+              ? {x: rect.x, y: rect.y - 1, w: rect.w, h: rect.h + 1}
+              : {x: rect.x, y: rect.y, w: rect.w, h: rect.h + 1};
+            if (!area_is_free(candidate.x, candidate.y, candidate.w, candidate.h)) {
+              break;
+            }
+            rect = candidate;
+          }
+          return rect;
+        }
+
+        function show_paint(rect) {
+          if (!rect) {
+            paint.style.display = 'none';
+            paintRect = null;
+            return;
+          }
+          paintRect = rect;
+          const cell_width = gridstack.cellWidth();
+          const cell_height = gridstack.getCellHeight();
+          paint.style.left = `${rect.x * cell_width}px`;
+          paint.style.top = `${rect.y * cell_height}px`;
+          paint.style.width = `${rect.w * cell_width}px`;
+          paint.style.height = `${rect.h * cell_height}px`;
+          paint.style.display = 'block';
+        }
+
+        function clear_paint() {
+          paint.style.display = 'none';
+          paintRect = null;
+          paintAnchor = null;
+          painting = false;
+        }
+
         state.sync_cell_size = sync_cell_size;
         sync_cell_size();
         if (typeof ResizeObserver !== 'undefined') {
           if (state.cell_resize_observer) {
             state.cell_resize_observer.disconnect();
           }
-          state.cell_resize_observer = new ResizeObserver(sync_cell_size);
+          state.cell_resize_observer = new ResizeObserver(() => {
+            sync_cell_size();
+            if (paintRect) {
+              show_paint(paintRect);
+            }
+          });
           state.cell_resize_observer.observe(grid);
         }
+
         function apply_mode(mode) {
           const arranging = mode === 'arrange';
           gridstack.enableMove(arranging);
           gridstack.enableResize(arranging);
           grid.classList.toggle('td-mode-add', mode === 'add');
           grid.classList.toggle('td-mode-lock', mode === 'lock');
+          if (mode !== 'add') {
+            clear_paint();
+          }
           state.mode = mode;
         }
         state.apply_mode = apply_mode;
         apply_mode(data.tool_mode);
+
+        grid.addEventListener('pointerdown', (event) => {
+          if (data.tool_mode !== 'add' || event.button !== 0) {
+            return;
+          }
+          if (event.target.closest('.grid-stack-item')) {
+            return;
+          }
+          const cell = cell_from_event(event);
+          if (!cell) {
+            return;
+          }
+          const rect = minimum_rect(cell);
+          if (!rect) {
+            return;
+          }
+          paintAnchor = cell;
+          painting = true;
+          show_paint(rect);
+          event.preventDefault();
+          if (grid.setPointerCapture) {
+            grid.setPointerCapture(event.pointerId);
+          }
+        });
+
+        grid.addEventListener('pointermove', (event) => {
+          if (data.tool_mode !== 'add') {
+            return;
+          }
+          if (painting && paintAnchor) {
+            const cell = cell_from_event(event);
+            if (cell) {
+              show_paint(grow_rect(paintAnchor, cell));
+            }
+            return;
+          }
+          if (event.target.closest('.grid-stack-item')) {
+            show_paint(null);
+            return;
+          }
+          const cell = cell_from_event(event);
+          show_paint(cell ? minimum_rect(cell) : null);
+        });
+
+        grid.addEventListener('pointerup', (event) => {
+          if (!painting) {
+            return;
+          }
+          const rect = paintRect;
+          painting = false;
+          paintAnchor = null;
+          clear_paint();
+          if (rect) {
+            data.figure_span = JSON.stringify({
+              x: rect.x, y: rect.y, w: rect.w, h: rect.h, n: Date.now()
+            });
+          }
+          if (grid.releasePointerCapture) {
+            try {
+              grid.releasePointerCapture(event.pointerId);
+            } catch (error) {
+              // The pointer may already be released.
+            }
+          }
+        });
+
+        grid.addEventListener('pointercancel', () => {
+          clear_paint();
+        });
+
+        grid.addEventListener('pointerleave', () => {
+          if (!painting) {
+            clear_paint();
+          }
+        });
         function sync_state(load=false) {
           const items = []
           for (const node of gridstack.engine.nodes) {
@@ -276,6 +476,30 @@ class SceneGrid(pn.layout.GridStack):
 
     def __init__(self, **params: Any) -> None:
         super().__init__(**params)
+        self._figure_span_handler: Callable[[int, int, int, int], Any] | None = None
+
+    def set_figure_span_handler(
+        self, handler: Callable[[int, int, int, int], Any]
+    ) -> None:
+        self._figure_span_handler = handler
+
+    @param.depends("figure_span", watch=True)
+    def _process_figure_span(self) -> None:
+        raw = self.figure_span
+        if not raw:
+            return
+        self.figure_span = ""
+        try:
+            payload = json.loads(raw)
+            x = int(payload["x"])
+            y = int(payload["y"])
+            width = int(payload["w"])
+            height = int(payload["h"])
+        except (KeyError, TypeError, ValueError, json.JSONDecodeError):
+            return
+        handler = getattr(self, "_figure_span_handler", None)
+        if handler is not None:
+            handler(x, y, width, height)
 
 
 def grid_rows(figures: list[dict[str, Any]]) -> int:

@@ -155,6 +155,56 @@ def test_add_figure_to_an_unknown_scene_raises() -> None:
         scenes.add_figure(state, "missing", 0, 0)
 
 
+def test_add_figure_at_keeps_the_painted_span() -> None:
+    state = default_state()
+    scene = make_scene(state)
+
+    figure = scenes.add_figure_at(state, scene["id"], 2, 1, 5, 4, range_key="24h")
+
+    assert figure["layout"] == {"x": 2, "y": 1, "w": 5, "h": 4}
+    assert figure["range"] == "24h"
+    assert scene["figures"] == [figure]
+    validate_state(state)
+
+
+def test_add_figure_at_does_not_fall_back_to_a_free_slot() -> None:
+    state = default_state()
+    scene = make_scene(state)
+    scenes.add_figure_at(state, scene["id"], 0, 0, 3, 2)
+
+    with pytest.raises(scenes.SceneError, match="occupied"):
+        scenes.add_figure_at(state, scene["id"], 0, 0, 3, 2)
+
+    assert len(scene["figures"]) == 1
+
+
+@pytest.mark.parametrize(
+    ("x", "y", "w", "h"),
+    [
+        (-1, 0, 3, 2),
+        (0, -1, 3, 2),
+        (0, 0, MIN_FIGURE_WIDTH - 1, 2),
+        (0, 0, 3, MIN_FIGURE_HEIGHT - 1),
+        (GRID_COLUMNS - 2, 0, 3, 2),
+    ],
+)
+def test_add_figure_at_rejects_invalid_spans(
+    x: int, y: int, w: int, h: int
+) -> None:
+    state = default_state()
+    scene = make_scene(state)
+
+    with pytest.raises(scenes.SceneError):
+        scenes.add_figure_at(state, scene["id"], x, y, w, h)
+
+
+def test_add_figure_at_to_an_unknown_scene_raises() -> None:
+    state = default_state()
+
+    with pytest.raises(scenes.SceneNotFound):
+        scenes.add_figure_at(state, "missing", 0, 0, 3, 2)
+
+
 def test_find_free_slot_rejects_impossible_sizes() -> None:
     assert scenes.find_free_slot([], width=GRID_COLUMNS + 1) is None
     assert scenes.find_free_slot([], width=MIN_FIGURE_WIDTH - 1) is None

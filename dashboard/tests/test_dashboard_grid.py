@@ -1,3 +1,5 @@
+import json
+
 import panel as pn
 
 from transducer_dashboard.grid import (
@@ -99,6 +101,45 @@ def test_the_mode_script_enables_movement_only_while_arranging() -> None:
     assert "gridstack.enableResize(arranging)" in render
     assert "td-mode-add" in render
     assert "td-mode-lock" in render
+
+
+def test_the_render_script_paints_a_free_span_in_add_mode() -> None:
+    render = SceneGrid._scripts["render"]
+
+    assert "pointerdown" in render
+    assert "pointermove" in render
+    assert "pointerup" in render
+    assert "isAreaEmpty" in render
+    assert "data.figure_span = JSON.stringify" in render
+    assert "classList.toggle('td-mode-add'" in render
+
+
+def test_the_paint_overlay_is_hidden_and_ignores_the_pointer() -> None:
+    assert ".grid-stack > .td-paint" in GRID_CSS
+    assert "pointer-events: none" in GRID_CSS
+    assert "display: none" in GRID_CSS
+
+
+def test_figure_span_reports_the_painted_span_and_resets() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
+    calls: list[tuple[int, int, int, int]] = []
+    grid.set_figure_span_handler(lambda x, y, w, h: calls.append((x, y, w, h)))
+
+    grid.figure_span = json.dumps({"x": 2, "y": 1, "w": 5, "h": 4, "n": 1})
+
+    assert calls == [(2, 1, 5, 4)]
+    assert grid.figure_span == ""
+
+
+def test_figure_span_ignores_invalid_payloads() -> None:
+    grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
+    calls: list[tuple[int, int, int, int]] = []
+    grid.set_figure_span_handler(lambda x, y, w, h: calls.append((x, y, w, h)))
+
+    grid.figure_span = "not-json"
+
+    assert calls == []
+    assert grid.figure_span == ""
 
 
 def test_scene_grid_places_a_card_in_the_requested_cells() -> None:
