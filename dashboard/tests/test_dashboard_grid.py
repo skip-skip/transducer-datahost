@@ -112,6 +112,9 @@ def test_the_render_script_paints_a_free_span_in_add_mode() -> None:
     assert "isAreaEmpty" in render
     assert "data.figure_span = JSON.stringify" in render
     assert "classList.toggle('td-mode-add'" in render
+    # Painting starts from the configured minimum, which is now one cell.
+    assert "data.min_figure_width" in render
+    assert "data.min_figure_height" in render
 
 
 def test_the_paint_overlay_is_hidden_and_ignores_the_pointer() -> None:

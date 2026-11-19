@@ -17,7 +17,8 @@ FastAPI service. The MVP deliberately stays small:
 - A scene is a named collection of figures placed in a gridded canvas.
 - Scenes can be created and deleted.
 - **All scenes are shared between all users.** There are no personal scenes.
-- Clicking an empty grid cell creates a new figure at the minimum size.
+- Painting empty grid cells in Add mode creates a figure with the painted span;
+  one cell is the smallest figure.
 - A figure has a title ribbon. Clicking the ribbon selects the figure; dragging
   the ribbon moves it within the grid.
 - Selecting a figure highlights it and populates the settings drawer. The
@@ -201,7 +202,7 @@ State remains one JSON file on the `dashboard_state` volume.
 - `range` is one of `24h`, `7d`, `30d`.
 - `layout` contains integer `x`, `y`, `w`, `h` with:
   - `x >= 0`, `y >= 0`
-  - `w >= 3`, `h >= 2`
+  - `w >= 1`, `h >= 1`
   - `x + w <= 12`
 - `ui` is an object keyed by token label. Each entry may contain
   `selected_scene_id`, `selected_figure_id`, and `scenes_tray_collapsed`.
@@ -211,7 +212,7 @@ State remains one JSON file on the `dashboard_state` volume.
 
 - 12 columns.
 - 220 px row height.
-- Minimum figure size: 3 columns x 2 rows.
+- Minimum figure size: 1 cell (1 column x 1 row).
 
 These are module constants for the MVP. Per-scene grid configuration is a
 follow-up.
@@ -237,8 +238,11 @@ The domain layer is plain Python and is testable without Panel.
 - `delete_scene(state, scene_id) -> None`
   - Removes the scene and clears matching UI selections.
 - `add_figure(state, scene_id, x, y) -> figure`
-  - Creates a minimum-size figure at `(x, y)`.
+  - Creates a default-size (3 x 2) figure at `(x, y)`.
   - Defaults: title `Untitled figure`, `range = 7d`, no location or series.
+- `add_figure_at(state, scene_id, x, y, w, h) -> figure`
+  - Creates a figure with the exact span painted on the canvas (1 x 1 or
+    larger) and never falls back to another slot.
 - `update_figure(state, scene_id, figure_id, *, title, location_id, series_id,
   range) -> figure`
   - Validates the title and range.
@@ -333,7 +337,7 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 `SceneGrid` subclasses `panel.layout.GridStack` and extends its render script to:
 
 - set the GridStack `handle` option to `.figure-ribbon`;
-- set `minW = 3` and `minH = 2`;
+- set `minW = 1` and `minH = 1`;
 - toggle moving and resizing from the canvas tool mode;
 - paint a free rectangle in Add mode and report it to Python;
 - publish the measured cell width and height as CSS variables for the grid
@@ -354,7 +358,8 @@ The speed dial in the bottom-right corner selects one of three canvas tools. The
 mode is session-local: it is not written to the state file and resets to
 **Arrange** on reload.
 
-- **Add** paints a new figure footprint on empty cells.
+- **Add** paints a new figure footprint on empty cells, starting from a single
+  cell.
 - **Arrange** (default) moves and resizes figures; it does not create figures.
 - **Lock** freezes the layout: no moving, resizing, or painting.
 
@@ -373,8 +378,9 @@ open.
 
 1. `pointerdown` on empty canvas converts the pointer position to a cell with
    GridStack's `getCellFromPixel({left, top}, true)`.
-2. The anchor cell must fit the 3 x 2 minimum and that rectangle must be free.
-   Otherwise the gesture is ignored.
+2. The anchor cell must be inside the grid and free. Otherwise the gesture is
+   ignored. The anchor is a single cell, so a plain click creates a 1 x 1
+   figure.
 3. A `.td-paint` overlay shows the footprint. It is absolutely positioned from
    the measured cell width and height, sits behind the figure cards, and has
    `pointer-events: none`.
@@ -387,12 +393,11 @@ open.
    `DashboardShell.create_figure_span`, which runs `scenes.add_figure_at` inside
    one `StateStore.mutate`. The new figure keeps the exact painted layout, is
    selected, and is persisted immediately.
-7. `add_figure_at` validates the bounds, minimum size, and occupancy. A painted
-   span never falls back to a free slot; a conflicting write reports instead of
-   creating a figure.
+7. `add_figure_at` validates the bounds, the one-cell minimum, and occupancy. A
+   painted span never falls back to a free slot; a conflicting write reports
+   instead of creating a figure.
 
-Hovering without pressing shows the minimum 3 x 2 preview, or nothing when the
-anchor cannot fit.
+Hovering without pressing shows a one-cell preview.
 
 ### Ribbon click versus drag
 
@@ -514,10 +519,10 @@ Manual browser checklist:
 3. In **Arrange**, click an empty cell: nothing is created. Drag a ribbon to
    move a figure and drag its corner to resize; the layout survives a reload and
    a container restart.
-4. Open the dial and choose **Add**. Hover empty cells to see the 3 x 2 preview;
-   drag to paint a larger footprint; release. The figure appears with exactly
-   that span. Painting stops at an existing figure, and a drag that starts on a
-   figure does nothing.
+4. Open the dial and choose **Add**. A plain click on an empty cell creates a
+   1 x 1 figure. Hover to see the one-cell preview, then drag to paint a larger
+   footprint and release. The figure appears with exactly that span. Painting
+   stops at an existing figure, and a drag that starts on a figure does nothing.
 5. Choose **Lock**: figures no longer move or resize and Add-mode painting is
    unavailable. Reload; the dial is back on **Arrange**.
 6. Click a ribbon; the figure highlights and the settings drawer keeps its

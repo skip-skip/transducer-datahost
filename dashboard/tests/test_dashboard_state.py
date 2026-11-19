@@ -150,14 +150,32 @@ def test_accepts_null_and_integer_series_scope(tmp_path) -> None:
     assert state["scenes"][0]["figures"][1]["series_id"] == 42
 
 
+def test_a_single_cell_is_a_valid_figure_size(tmp_path) -> None:
+    store = StateStore(tmp_path)
+    store.ensure()
+    write_document(
+        tmp_path,
+        make_document(make_scene(figures=[make_figure()])),
+    )
+
+    stored = store.load()
+
+    assert stored["scenes"][0]["figures"][0]["layout"] == {
+        "x": 0,
+        "y": 0,
+        "w": 1,
+        "h": 1,
+    }
+
+
 @pytest.mark.parametrize(
     ("overrides", "match"),
     [
         ({"location_id": "7"}, "location_id"),
         ({"series_id": 1.5}, "series_id"),
         ({"range": "1y"}, "range"),
-        ({"layout": {"x": 0, "y": 0, "w": 2, "h": 2}}, "at least 3"),
-        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 1}}, "at least 2"),
+        ({"layout": {"x": 0, "y": 0, "w": 0, "h": 2}}, "at least 1"),
+        ({"layout": {"x": 0, "y": 0, "w": 3, "h": 0}}, "at least 1"),
         ({"layout": {"x": 10, "y": 0, "w": 3, "h": 2}}, "fit within"),
         ({"layout": {"x": -1, "y": 0, "w": 3, "h": 2}}, "non-negative"),
         ({"layout": {"x": 0, "y": 0, "w": 3}}, "missing keys"),

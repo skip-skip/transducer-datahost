@@ -226,7 +226,7 @@ Figure settings drawer:
 
 Scene canvas (right of the drawers):
 
-- A 12-column grid with 220 px rows; a figure is at least 3 columns by 2 rows.
+- A 12-column grid with 220 px rows; the smallest figure is a single cell.
 - The canvas is light gray with 1 px grid lines on the cell boundaries, so
   empty cells read as a working grid behind the white figure cards.
 - A speed dial fixed to the bottom-right selects the canvas tool: **Add**,
@@ -235,10 +235,11 @@ Scene canvas (right of the drawers):
   while no scene is selected.
 - **Arrange** moves and resizes figures. Clicking an empty cell no longer
   creates a figure.
-- **Add** paints a new figure. Hovering an empty cell shows the minimum 3 x 2
-  footprint; dragging grows the highlight toward the cursor and stops at the
-  first occupied cell. Releasing creates a figure with exactly that span and
-  selects it. A drag that starts on a figure is ignored.
+- **Add** paints a new figure. Hovering an empty cell shows a one-cell preview;
+  click to create a single-cell figure, or drag to grow the highlight toward the
+  cursor. The span stops at the first occupied cell. Releasing creates a figure
+  with exactly that span and selects it. A drag that starts on a figure is
+  ignored.
 - **Lock** disables moving, resizing, and painting.
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
@@ -415,10 +416,11 @@ Manual browser checklist:
 3. In Arrange, click an empty cell: nothing is created. Drag a ribbon to move a
    figure and drag its corner to resize; the layout survives a reload and a
    restart.
-4. Open the dial and choose Add. Hover empty cells to see the 3 x 2 preview;
-   drag to paint a larger footprint and release. The figure appears with that
-   exact span and is selected. Painting stops at an existing figure, and a drag
-   that starts on a figure does nothing.
+4. Open the dial and choose Add. A plain click on an empty cell creates a 1 x 1
+   figure. Hover to see the one-cell preview, then drag to paint a larger
+   footprint and release; the figure appears with that exact span and is
+   selected. Painting stops at an existing figure, and a drag that starts on a
+   figure does nothing.
 5. Choose Lock; figures no longer move or resize and painting is unavailable.
    Reload; the dial returns to Arrange.
 6. Collapse each drawer independently. The scenes drawer stays collapsed after a

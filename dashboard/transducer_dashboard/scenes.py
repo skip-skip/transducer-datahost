@@ -12,6 +12,8 @@ from datetime import UTC, datetime
 from typing import Any
 
 from .state import (
+    DEFAULT_FIGURE_HEIGHT,
+    DEFAULT_FIGURE_WIDTH,
     DEFAULT_RANGE,
     GRID_COLUMNS,
     MIN_FIGURE_HEIGHT,
@@ -163,8 +165,8 @@ def _cell_is_free(
 
 def find_free_slot(
     figures: list[dict[str, Any]],
-    width: int = MIN_FIGURE_WIDTH,
-    height: int = MIN_FIGURE_HEIGHT,
+    width: int = DEFAULT_FIGURE_WIDTH,
+    height: int = DEFAULT_FIGURE_HEIGHT,
 ) -> tuple[int, int] | None:
     """Return the first free cell that fits a figure, scanning top to bottom."""
 
@@ -189,6 +191,8 @@ def add_figure(
     *,
     range_key: str = DEFAULT_RANGE,
 ) -> dict[str, Any]:
+    """Add a default-size figure at the cell, falling back to the first free slot."""
+
     scene = get_scene(state, scene_id)
     if range_key not in RANGES:
         raise SceneError(f"unknown range {range_key!r}")
@@ -200,8 +204,8 @@ def add_figure(
         raise SceneError(f"x must be less than {GRID_COLUMNS}")
 
     figures = scene.setdefault("figures", [])
-    width = MIN_FIGURE_WIDTH
-    height = MIN_FIGURE_HEIGHT
+    width = DEFAULT_FIGURE_WIDTH
+    height = DEFAULT_FIGURE_HEIGHT
     if x + width > GRID_COLUMNS or not _cell_is_free(figures, x, y, width, height):
         slot = find_free_slot(figures, width, height)
         if slot is None:

@@ -2,6 +2,8 @@ import pytest
 
 from transducer_dashboard import scenes
 from transducer_dashboard.state import (
+    DEFAULT_FIGURE_HEIGHT,
+    DEFAULT_FIGURE_WIDTH,
     GRID_COLUMNS,
     MIN_FIGURE_HEIGHT,
     MIN_FIGURE_WIDTH,
@@ -84,7 +86,7 @@ def test_delete_unknown_scene_raises() -> None:
         scenes.delete_scene(state, "missing")
 
 
-def test_add_figure_places_a_minimum_size_figure() -> None:
+def test_add_figure_places_a_default_size_figure() -> None:
     state = default_state()
     scene = make_scene(state)
 
@@ -93,8 +95,8 @@ def test_add_figure_places_a_minimum_size_figure() -> None:
     assert figure["layout"] == {
         "x": 2,
         "y": 1,
-        "w": MIN_FIGURE_WIDTH,
-        "h": MIN_FIGURE_HEIGHT,
+        "w": DEFAULT_FIGURE_WIDTH,
+        "h": DEFAULT_FIGURE_HEIGHT,
     }
     assert figure["title"] == scenes.DEFAULT_FIGURE_TITLE
     assert figure["range"] == "7d"
@@ -164,6 +166,16 @@ def test_add_figure_at_keeps_the_painted_span() -> None:
     assert figure["layout"] == {"x": 2, "y": 1, "w": 5, "h": 4}
     assert figure["range"] == "24h"
     assert scene["figures"] == [figure]
+    validate_state(state)
+
+
+def test_add_figure_at_accepts_a_single_cell() -> None:
+    state = default_state()
+    scene = make_scene(state)
+
+    figure = scenes.add_figure_at(state, scene["id"], 11, 5, 1, 1)
+
+    assert figure["layout"] == {"x": 11, "y": 5, "w": 1, "h": 1}
     validate_state(state)
 
 
@@ -340,8 +352,8 @@ def test_update_layout_rejects_overlap_without_mutating() -> None:
 @pytest.mark.parametrize(
     ("layout", "match"),
     [
-        ({"x": 0, "y": 0, "w": 2, "h": 2}, "at least 3"),
-        ({"x": 0, "y": 0, "w": 3, "h": 1}, "at least 2"),
+        ({"x": 0, "y": 0, "w": 0, "h": 2}, "at least 1"),
+        ({"x": 0, "y": 0, "w": 3, "h": 0}, "at least 1"),
         ({"x": 10, "y": 0, "w": 3, "h": 2}, "fit within"),
         ({"x": -1, "y": 0, "w": 3, "h": 2}, "non-negative"),
     ],
@@ -355,6 +367,19 @@ def test_update_layout_rejects_invalid_bounds(
 
     with pytest.raises(scenes.SceneError, match=match):
         scenes.update_layout(state, scene["id"], {figure["id"]: layout})
+
+
+def test_update_layout_allows_a_single_cell() -> None:
+    state = default_state()
+    scene = make_scene(state)
+    figure = scenes.add_figure(state, scene["id"], 4, 4)
+
+    scenes.update_layout(
+        state, scene["id"], {figure["id"]: {"x": 4, "y": 4, "w": 1, "h": 1}}
+    )
+
+    assert figure["layout"] == {"x": 4, "y": 4, "w": 1, "h": 1}
+    validate_state(state)
 
 
 def test_update_layout_rejects_an_unknown_figure() -> None:

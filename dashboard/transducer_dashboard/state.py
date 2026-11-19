@@ -37,8 +37,12 @@ LOCK_FILENAME = ".state.lock"
 # Grid configuration for the MVP. Per-scene grids are a follow-up.
 GRID_COLUMNS = 12
 GRID_ROW_HEIGHT = 220
-MIN_FIGURE_WIDTH = 3
-MIN_FIGURE_HEIGHT = 2
+MIN_FIGURE_WIDTH = 1
+MIN_FIGURE_HEIGHT = 1
+# Non-interactive callers (demo fixtures, scripts) still get a readable figure.
+# The canvas creates whatever span the user paints, down to one cell.
+DEFAULT_FIGURE_WIDTH = 3
+DEFAULT_FIGURE_HEIGHT = 2
 
 RANGES = ("24h", "7d", "30d")
 DEFAULT_RANGE = "7d"

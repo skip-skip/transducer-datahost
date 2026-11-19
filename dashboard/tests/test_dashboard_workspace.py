@@ -595,7 +595,7 @@ def test_a_selected_scene_shows_an_empty_grid(tmp_path) -> None:
     assert shell.figure_cards == {}
 
 
-def test_clicking_an_empty_cell_creates_a_minimum_size_figure(tmp_path) -> None:
+def test_create_figure_creates_a_default_size_figure(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     scene = shell.create_scene()
     assert scene is not None
@@ -638,6 +638,21 @@ def test_painting_a_span_creates_a_figure_with_that_layout(tmp_path) -> None:
         "h": 4,
     }
     assert stored["ui"]["alice"]["selected_figure_id"] == figure["id"]
+
+
+def test_painting_a_single_cell_creates_a_one_cell_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_tool_mode("add")
+    assert shell.grid is not None
+
+    shell.grid.figure_span = json.dumps({"x": 11, "y": 5, "w": 1, "h": 1, "n": 1})
+
+    stored = store.load()
+    figures = stored["scenes"][0]["figures"]
+    assert len(figures) == 1
+    assert figures[0]["layout"] == {"x": 11, "y": 5, "w": 1, "h": 1}
+    assert shell.selected_figure_id == figures[0]["id"]
 
 
 def test_the_grid_paint_bridge_creates_the_painted_figure(tmp_path) -> None:

@@ -21,7 +21,7 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
   unpublished figure drafts are per session and are not stored.
 
 Scenes are shared between all users; there are no personal scenes. The grid is
-12 columns wide with 220 px rows, and a figure is at least 3 columns by 2 rows.
+12 columns wide with 220 px rows, and a figure can be as small as one cell.
 
 In the browser, use the bottom-right speed dial to pick a canvas tool. **Add**
 paints a figure footprint on empty cells; **Arrange** (the default) moves and

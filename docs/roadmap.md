@@ -227,10 +227,11 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Left ribbon rail with full-height vertical tabs stacked left-to-right; the scenes
   drawer is leftmost and opens to the right, pushing the settings drawer and the canvas.
   It lists all shared scenes, with create and confirmed delete.
-- [x] Gridded scene canvas (12 columns, 220 px rows) with a minimum figure size of 3 x 2
+- [x] Gridded scene canvas (12 columns, 220 px rows) with a one-cell minimum figure size
   and a bottom-right tool dial. Add paints a free footprint and creates a figure with that
-  span; Arrange moves and resizes figures without creating them; Lock freezes the layout.
-  The tool choice is session-local and resets to Arrange on reload.
+  span (a plain click makes a 1 x 1 figure); Arrange moves and resizes figures without
+  creating them; Lock freezes the layout. The tool choice is session-local and resets to
+  Arrange on reload.
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:

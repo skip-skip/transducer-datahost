@@ -3,7 +3,6 @@
 ``SceneGrid`` extends Panel's ``GridStack`` with four additions:
 
 - the figure ribbon is the only drag handle;
-- figures have a minimum size of 3 x 2 cells;
 - a canvas tool mode that toggles moving and resizing;
 - painting empty cells in Add mode reports the painted span back to Python
   through a string parameter, so the shell can create a figure there.
