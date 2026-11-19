@@ -232,8 +232,9 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   the browser and never changes size when figures are created. While unlocked, figures
   move and resize, and painting a free footprint creates a figure with that span (a plain
   click makes a 1 x 1 figure). Lock freezes moving, resizing, painting, and selection.
-  The lock is session-local and resets to unlocked on reload. A targeted refresh
-  appends the new card without rebuilding the shell.
+  The lock is session-local and resets to unlocked on reload. The painted cells show a
+  card-shaped “Creating figure…” placeholder until the backend answers, and a targeted
+  refresh appends the new card without rebuilding the shell.
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:
