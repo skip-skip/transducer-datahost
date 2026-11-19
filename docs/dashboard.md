@@ -240,10 +240,6 @@ Scene canvas (right of the drawers):
   toward the cursor. The span stops at the first occupied cell. Releasing
   creates a figure with exactly that span and selects it. A drag that starts on
   a figure moves or selects it instead.
-- After release, the painted cells immediately show a card-shaped “Creating
-  figure…” placeholder while the backend persists the figure. It is replaced by
-  the real card as soon as the figure arrives, without rebuilding the rest of
-  the shell.
 - **Lock** disables moving, resizing, painting, and figure selection.
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
@@ -410,7 +406,7 @@ Automated coverage in `dashboard/tests`:
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
-Latest local run: `244 passed`; `ruff check dashboard` and
+Latest local run: `241 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
 grid layout persistence, the lock toggle, the paint bridge, settings
 publish/reload, and Bokeh chart rendering into a document.
@@ -423,11 +419,10 @@ Manual browser checklist:
    the layout survives a reload and a restart.
 4. A plain click on an empty cell creates a 1 x 1 figure. Hover to see the
    one-cell preview, then drag to paint a larger footprint and release; the
-   painted cells instantly show a “Creating figure…” card that is replaced by
-   the real figure with that exact span, selected. Painting stops at an existing
-   figure, and a drag that starts on a figure moves or selects it. The grid
-   keeps the same size, row count, and card density before and after the figure
-   appears.
+   figure appears with that exact span and is selected. Painting stops at an
+   existing figure, and a drag that starts on a figure moves or selects it. The
+   grid keeps the same size, row count, and card density before and after the
+   figure appears.
 5. Click Lock; figures no longer move, resize, or respond to selection, and
    painting is unavailable. Click Unlock to edit again. Reload; the canvas
    starts unlocked.

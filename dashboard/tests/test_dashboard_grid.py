@@ -104,7 +104,7 @@ def test_the_render_script_paints_a_free_span_while_unlocked() -> None:
     assert "isAreaEmpty" in render
     assert "data.figure_span = JSON.stringify" in render
     assert "classList.toggle('td-mode-edit'" in render
-    assert "if (data.locked || pending || event.button !== 0)" in render
+    assert "if (data.locked || event.button !== 0)" in render
     # Painting starts from the configured minimum, which is one cell.
     assert "data.min_figure_width" in render
     assert "data.min_figure_height" in render
@@ -114,37 +114,6 @@ def test_the_paint_overlay_is_hidden_and_ignores_the_pointer() -> None:
     assert ".grid-stack > .td-paint" in GRID_CSS
     assert "pointer-events: none" in GRID_CSS
     assert "display: none" in GRID_CSS
-
-
-def test_the_pending_placeholder_is_card_shaped() -> None:
-    assert ".grid-stack > .td-pending-figure" in GRID_CSS
-    assert ".td-pending-ribbon" in GRID_CSS
-    assert ".td-pending-body" in GRID_CSS
-    assert "animation: td-pending-pulse" in GRID_CSS
-    assert "pointer-events: none" in GRID_CSS
-
-
-def test_the_render_script_shows_a_pending_card_until_the_figure_arrives() -> None:
-    render = SceneGrid._scripts["render"]
-
-    assert "td-pending-figure" in render
-    assert "Creating figure&hellip;" in render
-    assert "pending = true" in render
-    assert "show_pending(rect)" in render
-    assert "MutationObserver" in render
-    assert "node.classList.contains('grid-stack-item')" in render
-    assert "node.hasAttribute('data-id')" in render
-    assert "clear_pending()" in render
-    assert "15000" in render
-
-
-def test_the_render_script_ignores_gestures_while_a_figure_is_pending() -> None:
-    render = SceneGrid._scripts["render"]
-
-    assert "if (data.locked || pending || event.button !== 0)" in render
-    assert "if (data.locked || pending)" in render
-    assert "if (!painting && !pending)" in render
-    assert "if (!pending)" in render
 
 
 def test_figure_span_reports_the_painted_span_and_resets() -> None:
