@@ -3,11 +3,9 @@ import json
 import panel as pn
 
 from transducer_dashboard.grid import (
-    DEFAULT_TOOL_MODE,
     GRID_BACKGROUND,
     GRID_CSS,
     GRID_LINE,
-    TOOL_MODES,
     FigureCard,
     SceneGrid,
     chart_placeholder,
@@ -85,25 +83,24 @@ def test_scene_grid_uses_the_ribbon_as_the_drag_handle() -> None:
     assert "float: true" in render
 
 
-def test_scene_grid_defaults_to_arrange_mode() -> None:
+def test_scene_grid_starts_unlocked() -> None:
     grid = SceneGrid(ncols=GRID_COLUMNS, nrows=6)
 
-    assert grid.tool_mode == DEFAULT_TOOL_MODE == "arrange"
-    assert tuple(grid.param.tool_mode.objects) == TOOL_MODES
+    assert grid.locked is False
 
 
-def test_the_mode_script_enables_movement_only_while_arranging() -> None:
-    mode_script = SceneGrid._scripts["tool_mode"]
+def test_the_lock_script_freezes_movement_and_resize() -> None:
+    lock_script = SceneGrid._scripts["locked"]
     render = SceneGrid._scripts["render"]
 
-    assert "state.apply_mode(data.tool_mode)" in mode_script
-    assert "gridstack.enableMove(arranging)" in render
-    assert "gridstack.enableResize(arranging)" in render
-    assert "td-mode-add" in render
+    assert "state.apply_lock(data.locked)" in lock_script
+    assert "gridstack.enableMove(!locked)" in render
+    assert "gridstack.enableResize(!locked)" in render
+    assert "td-mode-edit" in render
     assert "td-mode-lock" in render
 
 
-def test_the_render_script_paints_a_free_span_in_add_mode() -> None:
+def test_the_render_script_paints_a_free_span_while_unlocked() -> None:
     render = SceneGrid._scripts["render"]
 
     assert "pointerdown" in render
@@ -111,8 +108,9 @@ def test_the_render_script_paints_a_free_span_in_add_mode() -> None:
     assert "pointerup" in render
     assert "isAreaEmpty" in render
     assert "data.figure_span = JSON.stringify" in render
-    assert "classList.toggle('td-mode-add'" in render
-    # Painting starts from the configured minimum, which is now one cell.
+    assert "classList.toggle('td-mode-edit'" in render
+    assert "if (data.locked || event.button !== 0)" in render
+    # Painting starts from the configured minimum, which is one cell.
     assert "data.min_figure_width" in render
     assert "data.min_figure_height" in render
 

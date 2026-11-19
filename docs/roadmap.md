@@ -228,10 +228,10 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
   drawer is leftmost and opens to the right, pushing the settings drawer and the canvas.
   It lists all shared scenes, with create and confirmed delete.
 - [x] Gridded scene canvas (12 columns, 220 px rows) with a one-cell minimum figure size
-  and a bottom-right tool dial. Add paints a free footprint and creates a figure with that
-  span (a plain click makes a 1 x 1 figure); Arrange moves and resizes figures without
-  creating them; Lock freezes the layout. The tool choice is session-local and resets to
-  Arrange on reload.
+  and a bottom-right lock toggle. While unlocked, figures move and resize, and painting a
+  free footprint creates a figure with that span (a plain click makes a 1 x 1 figure).
+  Lock freezes moving, resizing, painting, and selection. The lock is session-local and
+  resets to unlocked on reload.
 - [x] Figure title ribbon: click selects and highlights the figure and populates the
   settings drawer; drag moves the figure. Layout persists across reloads and restarts.
 - [x] Settings drawer with a vertical tab that opens to the right and pushes the canvas:
@@ -244,7 +244,7 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 - [x] Panel cookie validation against the existing signed session cookie, the minimum
   Content Security Policy for Bokeh/Panel, and self-hosted Panel resources.
 - [x] Tests for state v2, scene/figure operations, and the Panel mount.
-- [x] Tests for the Panel scene-shell, grid (tool modes and Add-mode painting), and
+- [x] Tests for the Panel scene-shell, grid (layout lock and canvas painting), and
   settings-drawer callbacks.
 - [x] Tests for the chart builder.
 
@@ -252,7 +252,7 @@ The design is in [dashboard-panel-design.md](dashboard-panel-design.md).
 
 - [x] Login with a read token works; an invalid or missing session shows the sign-in path.
 - [x] Create and delete scenes; a container restart preserves the remaining scenes.
-- [x] Add mode creates a figure with the painted span; painting stops at occupied cells and
+- [x] Painting creates a figure with the painted span; painting stops at occupied cells and
   a conflicting span reports instead of overlapping figures.
 - [ ] Clicking a ribbon selects the figure; dragging moves it; the layout survives reload
   and restart. (Selection and layout persistence are automated; dragging needs the

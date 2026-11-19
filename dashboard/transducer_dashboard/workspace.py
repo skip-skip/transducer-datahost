@@ -27,10 +27,8 @@ import panel as pn
 from . import charts, scenes
 from .auth import Session
 from .grid import (
-    DEFAULT_TOOL_MODE,
     GRID_BACKGROUND,
     GRID_CSS,
-    TOOL_MODES,
     FigureCard,
     SceneGrid,
     chart_placeholder,
@@ -49,8 +47,6 @@ from .state import (
 
 RAIL_TAB_WIDTH = 44
 DRAWER_WIDTH = 340
-
-TOOL_MODE_LABELS = {"add": "Add", "arrange": "Arrange", "lock": "Lock"}
 
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; }
@@ -91,11 +87,11 @@ MUTED_STYLE = "color:#5b6472;"
 NOTICE_CSS = """
 :host {
   position: fixed;
-  right: 8.75rem;
+  right: 7.5rem;
   bottom: 1rem;
   z-index: 9999;
   width: auto;
-  max-width: min(28rem, calc(100vw - 10.5rem));
+  max-width: min(28rem, calc(100vw - 9rem));
   pointer-events: none;
 }
 .td-notice {
@@ -115,9 +111,9 @@ NOTICE_CSS = """
 }
 """
 
-# The speed dial is fixed to the viewport, like the notice. Buttons carry their
-# own inline styles so they render the same inside the pane's shadow root.
-DIAL_CSS = """
+# The lock toggle is fixed to the viewport, like the notice, so it overlays the
+# grid instead of taking layout space. The notice sits to its left.
+LOCK_CSS = """
 :host {
   position: fixed;
   right: 1rem;
@@ -125,10 +121,6 @@ DIAL_CSS = """
   z-index: 9000;
   width: max-content !important;
   height: auto !important;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 0.5rem;
 }
 """
 
@@ -256,8 +248,7 @@ class DashboardShell:
         self._tray_collapsed = False
         self._settings_collapsed = False
         self._delete_confirm = False
-        self._tool_mode = DEFAULT_TOOL_MODE
-        self._dial_open = False
+        self._locked = False
 
         # Session-local drafts keyed by figure ID. A draft holds only the
         # settings fields the user has changed, so publishing writes just those
@@ -272,9 +263,8 @@ class DashboardShell:
         self.confirm_delete_button: pn.widgets.Button | None = None
         self.cancel_delete_button: pn.widgets.Button | None = None
         self.notice: pn.pane.HTML
-        self.speed_dial: pn.Column
-        self.dial_button: pn.widgets.Button
-        self.mode_buttons: dict[str, pn.widgets.Button] = {}
+        self.lock_control: pn.Column
+        self.lock_button: pn.widgets.Button
         self.header: pn.pane.HTML | None = None
         self._grid: SceneGrid | None = None
         self._figure_cards: dict[str, FigureCard] = {}
@@ -321,7 +311,7 @@ class DashboardShell:
             stylesheets=[NOTICE_CSS],
             margin=0,
         )
-        self.speed_dial = self._build_speed_dial()
+        self.lock_control = self._build_lock_control()
 
         self._load()
         self.refresh()
@@ -341,8 +331,8 @@ class DashboardShell:
         return self._selected_figure_id
 
     @property
-    def tool_mode(self) -> str:
-        return self._tool_mode
+    def locked(self) -> bool:
+        return self._locked
 
     @property
     def tray_collapsed(self) -> bool:
@@ -539,7 +529,7 @@ class DashboardShell:
 
     def select_figure(self, figure_id: str, event: Any = None) -> None:
         scene_id = self._selected_scene_id
-        if scene_id is None:
+        if scene_id is None or self._locked:
             return
         label = self.session.label
 
@@ -572,7 +562,7 @@ class DashboardShell:
 
     def create_figure(self, x: int, y: int) -> dict[str, Any] | None:
         scene_id = self._selected_scene_id
-        if scene_id is None:
+        if scene_id is None or self._locked:
             return None
         label = self.session.label
 
@@ -603,10 +593,10 @@ class DashboardShell:
     def create_figure_span(
         self, x: int, y: int, width: int, height: int
     ) -> dict[str, Any] | None:
-        """Create a figure with the exact span painted in Add mode."""
+        """Create a figure with the exact span painted on the canvas."""
 
         scene_id = self._selected_scene_id
-        if scene_id is None or self._tool_mode != "add":
+        if scene_id is None or self._locked:
             return None
         label = self.session.label
 
@@ -827,66 +817,42 @@ class DashboardShell:
         if self.settings_body is not None:
             self._fill_settings()
 
-    # -- tool mode ---------------------------------------------------------
+    # -- layout lock -------------------------------------------------------
 
-    def _build_speed_dial(self) -> pn.Column:
-        options: list[pn.widgets.Button] = []
-        for mode in TOOL_MODES:
-            button = pn.widgets.Button(
-                label=TOOL_MODE_LABELS[mode],
-                css_classes=["td-dial-option"],
-                margin=0,
-                styles={"width": "8rem", "justify-content": "flex-start"},
-            )
-
-            def select_mode(event: Any, selected: str = mode) -> None:
-                self.set_tool_mode(selected)
-
-            button.on_click(select_mode)
-            self.mode_buttons[mode] = button
-            options.append(button)
-        self.dial_button = pn.widgets.Button(
-            label=TOOL_MODE_LABELS[DEFAULT_TOOL_MODE],
-            css_classes=["td-dial-fab"],
+    def _build_lock_control(self) -> pn.Column:
+        self.lock_button = pn.widgets.Button(
+            label="Lock",
+            css_classes=["td-lock-button"],
             margin=0,
             styles={
                 "border-radius": "999px",
                 "padding": "0.45rem 0.9rem",
                 "font-weight": "600",
+                "box-shadow": "0 4px 16px rgba(0, 0, 0, 0.16)",
             },
         )
-        self.dial_button.on_click(self._on_dial_toggle)
+        self.lock_button.on_click(self._on_lock_toggle)
         return pn.Column(
-            *options,
-            self.dial_button,
-            stylesheets=[DIAL_CSS],
+            self.lock_button,
+            stylesheets=[LOCK_CSS],
             margin=0,
         )
 
-    def _on_dial_toggle(self, event: Any) -> None:
-        self._dial_open = not self._dial_open
-        self._refresh_dial()
+    def _on_lock_toggle(self, event: Any) -> None:
+        self.set_locked(not self._locked)
 
-    def _refresh_dial(self) -> None:
-        active = TOOL_MODE_LABELS[self._tool_mode]
-        enabled = self._selected_scene_id is not None
-        self.dial_button.disabled = not enabled
-        self.dial_button.label = "✕" if self._dial_open else active
-        for mode, button in self.mode_buttons.items():
-            button.visible = self._dial_open
-            button.disabled = not enabled
-            button.button_type = "primary" if mode == self._tool_mode else "light"
-            prefix = "✓ " if mode == self._tool_mode else ""
-            button.label = f"{prefix}{TOOL_MODE_LABELS[mode]}"
+    def _refresh_lock(self) -> None:
+        self.lock_button.disabled = self._selected_scene_id is None
+        self.lock_button.label = "Unlock" if self._locked else "Lock"
+        self.lock_button.button_type = "warning" if self._locked else "light"
 
-    def set_tool_mode(self, mode: str) -> None:
-        if mode not in TOOL_MODES:
-            return
-        self._tool_mode = mode
-        self._dial_open = False
-        self._refresh_dial()
+    def set_locked(self, locked: bool) -> None:
+        self._locked = bool(locked)
+        self._refresh_lock()
         if self._grid is not None:
-            self._grid.tool_mode = mode
+            self._grid.locked = self._locked
+        for card in self._figure_cards.values():
+            card.set_locked(self._locked)
 
     # -- notices -----------------------------------------------------------
 
@@ -929,7 +895,7 @@ class DashboardShell:
         self.settings_card = None
         self.settings_body = None
         self.rail = None
-        self._refresh_dial()
+        self._refresh_lock()
         self._view.objects = [
             self._render_header(),
             pn.Row(
@@ -940,7 +906,7 @@ class DashboardShell:
             ),
             self.conflict_modal,
             self.notice,
-            self.speed_dial,
+            self.lock_control,
         ]
 
     def _render_header(self) -> pn.pane.HTML:
@@ -1136,7 +1102,7 @@ class DashboardShell:
         grid = SceneGrid(
             ncols=GRID_COLUMNS,
             nrows=rows,
-            tool_mode=self._tool_mode,
+            locked=self._locked,
             sizing_mode="stretch_both",
             css_classes=["scene-grid"],
             stylesheets=[GRID_CSS],
@@ -1149,6 +1115,7 @@ class DashboardShell:
             card = FigureCard(display, on_select=self.select_figure)
             card.set_selected(figure["id"] == self._selected_figure_id)
             card.set_unpublished(figure["id"] in self._drafts)
+            card.set_locked(self._locked)
             layout = figure["layout"]
             grid[
                 layout["y"] : layout["y"] + layout["h"],

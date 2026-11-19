@@ -229,18 +229,16 @@ Scene canvas (right of the drawers):
 - A 12-column grid with 220 px rows; the smallest figure is a single cell.
 - The canvas is light gray with 1 px grid lines on the cell boundaries, so
   empty cells read as a working grid behind the white figure cards.
-- A speed dial fixed to the bottom-right selects the canvas tool: **Add**,
-  **Arrange** (the default), or **Lock**. The choice is session-local: it is not
-  saved and resets to Arrange on reload. The dial stays visible but is disabled
-  while no scene is selected.
-- **Arrange** moves and resizes figures. Clicking an empty cell no longer
-  creates a figure.
-- **Add** paints a new figure. Hovering an empty cell shows a one-cell preview;
-  click to create a single-cell figure, or drag to grow the highlight toward the
-  cursor. The span stops at the first occupied cell. Releasing creates a figure
-  with exactly that span and selects it. A drag that starts on a figure is
-  ignored.
-- **Lock** disables moving, resizing, and painting.
+- A **Lock** / **Unlock** button fixed to the bottom-right overlays the canvas.
+  The lock is session-local: it is not saved and resets to unlocked on reload.
+  The button stays visible but is disabled while no scene is selected.
+- While unlocked, the canvas is editable: figures move and resize, and painting
+  an empty rectangle creates a figure. Hovering an empty cell shows a one-cell
+  preview; click to create a single-cell figure, or drag to grow the highlight
+  toward the cursor. The span stops at the first occupied cell. Releasing
+  creates a figure with exactly that span and selects it. A drag that starts on
+  a figure moves or selects it instead.
+- **Lock** disables moving, resizing, painting, and figure selection.
 - Each figure has a title ribbon and a chart. Click the ribbon to select and
   highlight the figure; drag the ribbon to move it; drag the lower-right corner
   to resize. Layouts persist immediately and survive reloads and restarts.
@@ -399,30 +397,29 @@ Automated coverage in `dashboard/tests`:
 - Scene and figure operations, layout bounds, minimum size, selection cleanup.
 - FastAPI auth, health, security headers, the per-route CSP, Panel mount,
   self-hosted resources, and the absence of external CDN URLs.
-- Panel shell, grid, tool modes, Add-mode painting, settings-drawer callbacks,
+- Panel shell, grid, layout lock, canvas painting, settings-drawer callbacks,
   and chart builder/windowing.
 - Read-client and settings behavior.
 - Dev fixtures, the demo seed, and the prod-like login path.
 
 Latest local run: `225 passed`; `ruff check dashboard` and
 `mypy dashboard/transducer_dashboard` clean. Startup/restart scripts verified
-grid layout persistence, the tool-mode speed dial, the paint bridge, settings
+grid layout persistence, the lock toggle, the paint bridge, settings
 publish/reload, and Bokeh chart rendering into a document.
 
 Manual browser checklist:
 
 1. Log in with a valid read token; an invalid token is rejected.
 2. Create and delete scenes; a container restart preserves the remaining scenes.
-3. In Arrange, click an empty cell: nothing is created. Drag a ribbon to move a
-   figure and drag its corner to resize; the layout survives a reload and a
-   restart.
-4. Open the dial and choose Add. A plain click on an empty cell creates a 1 x 1
-   figure. Hover to see the one-cell preview, then drag to paint a larger
-   footprint and release; the figure appears with that exact span and is
-   selected. Painting stops at an existing figure, and a drag that starts on a
-   figure does nothing.
-5. Choose Lock; figures no longer move or resize and painting is unavailable.
-   Reload; the dial returns to Arrange.
+3. While unlocked, drag a ribbon to move a figure and drag its corner to resize;
+   the layout survives a reload and a restart.
+4. A plain click on an empty cell creates a 1 x 1 figure. Hover to see the
+   one-cell preview, then drag to paint a larger footprint and release; the
+   figure appears with that exact span and is selected. Painting stops at an
+   existing figure, and a drag that starts on a figure moves or selects it.
+5. Click Lock; figures no longer move, resize, or respond to selection, and
+   painting is unavailable. Click Unlock to edit again. Reload; the canvas
+   starts unlocked.
 6. Collapse each drawer independently. The scenes drawer stays collapsed after a
    reload; the settings drawer resets to open.
 7. Click a ribbon; the figure highlights and the settings drawer keeps its

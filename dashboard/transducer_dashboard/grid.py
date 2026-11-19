@@ -3,9 +3,9 @@
 ``SceneGrid`` extends Panel's ``GridStack`` with four additions:
 
 - the figure ribbon is the only drag handle;
-- a canvas tool mode that toggles moving and resizing;
-- painting empty cells in Add mode reports the painted span back to Python
-  through a string parameter, so the shell can create a figure there.
+- a lock toggle that freezes moving, resizing, and painting;
+- painting empty cells reports the painted span back to Python through a string
+  parameter, so the shell can create a figure there.
 
 ``FigureCard`` is the Panel view placed in each grid cell. Its ribbon button is
 both the selection control and the drag handle.
@@ -25,9 +25,6 @@ from .state import GRID_COLUMNS, GRID_ROW_HEIGHT, MIN_FIGURE_HEIGHT, MIN_FIGURE_
 
 GRID_MIN_ROWS = 6
 GRID_EXTRA_ROWS = 3
-
-TOOL_MODES = ("add", "arrange", "lock")
-DEFAULT_TOOL_MODE = "arrange"
 
 GRID_BACKGROUND = "#f7f8fa"
 GRID_LINE = "#e2e6ec"
@@ -83,9 +80,10 @@ GRID_CSS = """
     var(--td-cell-height, {GRID_ROW_HEIGHT}px);
   box-shadow: inset -1px -1px 0 {GRID_LINE};
 }}
-.grid-stack.td-mode-add {{ cursor: crosshair; user-select: none; }}
-.grid-stack.td-mode-add .grid-stack-item {{ cursor: default; }}
+.grid-stack.td-mode-edit {{ cursor: crosshair; user-select: none; }}
+.grid-stack.td-mode-edit .grid-stack-item {{ cursor: default; }}
 .grid-stack.td-mode-lock .grid-stack-item {{ cursor: default; }}
+.grid-stack.td-mode-lock .figure-ribbon {{ cursor: default; }}
 .grid-stack > .td-paint {{
   position: absolute;
   z-index: 0;
@@ -146,6 +144,9 @@ class FigureCard(pn.Column):
         ribbon.on_click(handler)
         self._apply_classes()
 
+    def set_locked(self, locked: bool) -> None:
+        self.ribbon.disabled = locked
+
     def set_selected(self, selected: bool) -> None:
         self._selected = selected
         self._apply_classes()
@@ -171,17 +172,16 @@ class FigureCard(pn.Column):
 
 
 class SceneGrid(pn.layout.GridStack):
-    """GridStack with ribbon-only dragging and a canvas tool mode."""
+    """GridStack with ribbon-only dragging and a layout lock."""
 
-    tool_mode = param.ObjectSelector(
-        default=DEFAULT_TOOL_MODE,
-        objects=list(TOOL_MODES),
-        doc="Canvas tool: add figures, arrange them, or lock the layout.",
+    locked = param.Boolean(
+        default=False,
+        doc="Freeze moving, resizing, painting, and figure selection.",
     )
 
     figure_span = param.String(
         default="",
-        doc="JSON span painted in Add mode, consumed once by the shell.",
+        doc="JSON span painted on empty cells, consumed once by the shell.",
     )
 
     min_figure_width = param.Integer(
@@ -345,21 +345,20 @@ class SceneGrid(pn.layout.GridStack):
           state.cell_resize_observer.observe(grid);
         }
 
-        function apply_mode(mode) {
-          const arranging = mode === 'arrange';
-          gridstack.enableMove(arranging);
-          gridstack.enableResize(arranging);
-          grid.classList.toggle('td-mode-add', mode === 'add');
-          grid.classList.toggle('td-mode-lock', mode === 'lock');
-          if (mode !== 'add') {
+        function apply_lock(locked) {
+          gridstack.enableMove(!locked);
+          gridstack.enableResize(!locked);
+          grid.classList.toggle('td-mode-edit', !locked);
+          grid.classList.toggle('td-mode-lock', locked);
+          if (locked) {
             clear_paint();
           }
         }
-        state.apply_mode = apply_mode;
-        apply_mode(data.tool_mode);
+        state.apply_lock = apply_lock;
+        apply_lock(data.locked);
 
         grid.addEventListener('pointerdown', (event) => {
-          if (data.tool_mode !== 'add' || event.button !== 0) {
+          if (data.locked || event.button !== 0) {
             return;
           }
           if (event.target.closest('.grid-stack-item')) {
@@ -383,7 +382,7 @@ class SceneGrid(pn.layout.GridStack):
         });
 
         grid.addEventListener('pointermove', (event) => {
-          if (data.tool_mode !== 'add') {
+          if (data.locked) {
             return;
           }
           if (painting && paintAnchor) {
@@ -465,9 +464,9 @@ class SceneGrid(pn.layout.GridStack):
           state.sync_cell_size()
         }
         """,
-        "tool_mode": """
-        if (state.apply_mode) {
-          state.apply_mode(data.tool_mode)
+        "locked": """
+        if (state.apply_lock) {
+          state.apply_lock(data.locked)
         }
         """,
     }
@@ -515,7 +514,6 @@ def grid_height(rows: int) -> int:
 
 
 __all__ = [
-    "DEFAULT_TOOL_MODE",
     "FigureCard",
     "GRID_BACKGROUND",
     "GRID_COLUMNS",
@@ -526,7 +524,6 @@ __all__ = [
     "MIN_FIGURE_HEIGHT",
     "MIN_FIGURE_WIDTH",
     "SceneGrid",
-    "TOOL_MODES",
     "chart_placeholder",
     "grid_height",
     "grid_rows",

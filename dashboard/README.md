@@ -23,12 +23,12 @@ mounted at `/var/lib/transducer-dashboard/state.json`. It contains:
 Scenes are shared between all users; there are no personal scenes. The grid is
 12 columns wide with 220 px rows, and a figure can be as small as one cell.
 
-In the browser, use the bottom-right speed dial to pick a canvas tool. **Add**
-paints a figure footprint on empty cells; **Arrange** (the default) moves and
-resizes figures; **Lock** freezes the layout. Click a figure's title ribbon to
-select it, and drag the ribbon or its lower-right corner while arranging. The
-tool choice is per session and resets to Arrange on reload. Layout changes are
-saved immediately to the shared state. The settings drawer opens only from its
+In the browser, the bottom-right **Lock** button freezes the layout; **Unlock**
+restores editing. While unlocked, figures move and resize, and painting an empty
+rectangle creates a figure. Click a figure's title ribbon to select it, and drag
+the ribbon or its lower-right corner. Locking also disables selection. The lock
+is per session and resets to unlocked on reload. Layout changes are saved
+immediately to the shared state. The settings drawer opens only from its
 tab; selecting or creating a figure updates its contents without changing
 whether it is open.
 

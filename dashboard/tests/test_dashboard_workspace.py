@@ -236,69 +236,75 @@ def test_the_notice_is_a_fixed_toast(tmp_path) -> None:
     assert shell.notice in shell.view.objects
     styles = " ".join(str(sheet) for sheet in shell.notice.stylesheets)
     assert "position: fixed" in styles
-    assert "right: 8.75rem" in styles
+    assert "right: 7.5rem" in styles
     assert "bottom: 1rem" in styles
     assert "animation: td-notice-dismiss 3s" in styles
 
 
-def test_the_speed_dial_starts_closed_in_arrange_mode(tmp_path) -> None:
+def test_the_lock_button_starts_unlocked(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
-    assert shell.tool_mode == "arrange"
-    assert shell.dial_button.label == "Arrange"
-    assert shell.view.objects[-1] is shell.speed_dial
-    assert set(shell.mode_buttons) == {"add", "arrange", "lock"}
-    assert all(not button.visible for button in shell.mode_buttons.values())
-    assert shell.mode_buttons["arrange"].button_type == "primary"
+    assert shell.locked is False
+    assert shell.lock_button.label == "Lock"
+    assert shell.lock_button.button_type == "light"
+    assert shell.view.objects[-1] is shell.lock_control
+    styles = " ".join(str(sheet) for sheet in shell.lock_control.stylesheets)
+    assert "position: fixed" in styles
+    assert "right: 1rem" in styles
+    assert "bottom: 1rem" in styles
 
 
-def test_the_speed_dial_is_disabled_until_a_scene_is_selected(tmp_path) -> None:
+def test_the_lock_button_is_disabled_until_a_scene_is_selected(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
 
-    assert shell.dial_button.disabled is True
+    assert shell.lock_button.disabled is True
 
     shell.create_scene()
 
-    assert shell.dial_button.disabled is False
+    assert shell.lock_button.disabled is False
 
 
-def test_the_speed_dial_toggles_and_selects_a_mode(tmp_path) -> None:
+def test_the_lock_button_toggles_the_layout_lock(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
 
-    shell.dial_button.clicks += 1
+    shell.lock_button.clicks += 1
 
-    assert shell.dial_button.label == "✕"
-    assert all(button.visible for button in shell.mode_buttons.values())
+    assert shell.locked is True
+    assert shell.lock_button.label == "Unlock"
+    assert shell.lock_button.button_type == "warning"
+    assert shell.grid is not None
+    assert shell.grid.locked is True
 
-    shell.mode_buttons["lock"].clicks += 1
+    shell.lock_button.clicks += 1
 
-    assert shell.tool_mode == "lock"
-    assert shell.dial_button.label == "Lock"
-    assert all(not button.visible for button in shell.mode_buttons.values())
-    assert shell.mode_buttons["lock"].button_type == "primary"
+    assert shell.locked is False
+    assert shell.lock_button.label == "Lock"
+    assert shell.lock_button.button_type == "light"
+    assert shell.grid is not None
+    assert shell.grid.locked is False
 
 
-def test_the_tool_mode_is_applied_to_the_grid_and_survives_refresh(tmp_path) -> None:
+def test_the_lock_state_is_applied_to_the_grid_and_survives_refresh(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
-    shell.set_tool_mode("add")
     shell.create_scene()
+    shell.set_locked(True)
 
     assert shell.grid is not None
-    assert shell.grid.tool_mode == "add"
+    assert shell.grid.locked is True
 
     shell.refresh()
 
     assert shell.grid is not None
-    assert shell.grid.tool_mode == "add"
+    assert shell.grid.locked is True
 
 
-def test_the_tool_mode_is_not_written_to_the_state_file(tmp_path) -> None:
+def test_the_lock_state_is_not_written_to_the_state_file(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
     before = store.path.read_text(encoding="utf-8")
 
-    shell.set_tool_mode("lock")
+    shell.set_locked(True)
 
     assert store.path.read_text(encoding="utf-8") == before
 
@@ -621,7 +627,6 @@ def test_create_figure_creates_a_default_size_figure(tmp_path) -> None:
 def test_painting_a_span_creates_a_figure_with_that_layout(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
-    shell.set_tool_mode("add")
 
     figure = shell.create_figure_span(2, 1, 5, 4)
 
@@ -643,7 +648,6 @@ def test_painting_a_span_creates_a_figure_with_that_layout(tmp_path) -> None:
 def test_painting_a_single_cell_creates_a_one_cell_figure(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
-    shell.set_tool_mode("add")
     assert shell.grid is not None
 
     shell.grid.figure_span = json.dumps({"x": 11, "y": 5, "w": 1, "h": 1, "n": 1})
@@ -658,7 +662,6 @@ def test_painting_a_single_cell_creates_a_one_cell_figure(tmp_path) -> None:
 def test_the_grid_paint_bridge_creates_the_painted_figure(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
-    shell.set_tool_mode("add")
     assert shell.grid is not None
 
     shell.grid.figure_span = json.dumps({"x": 6, "y": 2, "w": 3, "h": 3, "n": 1})
@@ -670,19 +673,60 @@ def test_the_grid_paint_bridge_creates_the_painted_figure(tmp_path) -> None:
     assert shell.selected_figure_id == figures[0]["id"]
 
 
-def test_painting_is_ignored_outside_add_mode(tmp_path) -> None:
+def test_painting_is_ignored_while_locked(tmp_path) -> None:
     shell, store = make_shell(tmp_path)
     shell.create_scene()
-    shell.set_tool_mode("arrange")
+    shell.set_locked(True)
 
     assert shell.create_figure_span(2, 1, 5, 4) is None
     assert store.load()["scenes"][0]["figures"] == []
 
 
+def test_locking_prevents_creating_a_default_size_figure(tmp_path) -> None:
+    shell, store = make_shell(tmp_path)
+    shell.create_scene()
+    shell.set_locked(True)
+
+    assert shell.create_figure(4, 3) is None
+    assert store.load()["scenes"][0]["figures"] == []
+
+
+def test_locking_prevents_selecting_a_figure(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    shell.select_figure(first["id"])
+
+    shell.set_locked(True)
+    shell.select_figure(second["id"])
+
+    assert shell.selected_figure_id == first["id"]
+    assert shell.figure_cards[second["id"]].ribbon.disabled is True
+
+
+def test_unlocking_restores_figure_selection(tmp_path) -> None:
+    shell, _ = make_shell(tmp_path)
+    shell.create_scene()
+    first = shell.create_figure(0, 0)
+    second = shell.create_figure(3, 0)
+    assert first is not None
+    assert second is not None
+    shell.select_figure(first["id"])
+    shell.set_locked(True)
+
+    shell.set_locked(False)
+    shell.select_figure(second["id"])
+
+    assert shell.selected_figure_id == second["id"]
+    assert shell.figure_cards[second["id"]].ribbon.disabled is False
+
+
 def test_painting_over_an_occupied_span_is_rejected(tmp_path) -> None:
     shell, _ = make_shell(tmp_path)
     shell.create_scene()
-    shell.set_tool_mode("add")
     first = shell.create_figure_span(0, 0, 3, 2)
 
     assert first is not None
