@@ -343,6 +343,12 @@ nested Bokeh shadow roots, where shell stylesheets do not reach.
 - publish the measured cell width and height as CSS variables for the grid
   background.
 
+The grid is given an explicit `height` of `nrows * GRID_ROW_HEIGHT` and
+`stretch_width` sizing. `SceneGrid` derives its cell height from that explicit
+height, so the cell size stays correct even when the canvas is rebuilt in place
+and the new element has not been laid out yet. Panel also sizes each figure card
+from the same explicit height.
+
 The grid canvas is light gray (`#f7f8fa`) with 1 px cell lines (`#e2e6ec`).
 The rule targets the inner `.grid-stack` element and sizes the background with
 two CSS variables, `--td-cell-width` and `--td-cell-height`. The render script

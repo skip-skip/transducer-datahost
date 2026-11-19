@@ -596,7 +596,8 @@ def test_a_selected_scene_shows_an_empty_grid(tmp_path) -> None:
     assert shell.grid is not None
     assert shell.grid.ncols == GRID_COLUMNS
     assert shell.grid.nrows == 6
-    assert shell.grid.sizing_mode == "stretch_both"
+    assert shell.grid.sizing_mode == "stretch_width"
+    assert shell.grid.height == 6 * GRID_ROW_HEIGHT
     assert shell.canvas_body.height == 6 * GRID_ROW_HEIGHT
     assert shell.figure_cards == {}
 
@@ -719,6 +720,9 @@ def test_a_figure_that_needs_more_rows_rebuilds_only_the_canvas(tmp_path) -> Non
 
     assert second is not None
     assert shell.grid is not grid
+    assert shell.grid.nrows == 10
+    assert shell.grid.height == 10 * GRID_ROW_HEIGHT
+    assert shell.grid.sizing_mode == "stretch_width"
     assert shell.rail is rail
     assert shell.tray_card is tray
     assert second["id"] in shell.figure_cards

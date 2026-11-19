@@ -1154,7 +1154,8 @@ class DashboardShell:
             ncols=GRID_COLUMNS,
             nrows=rows,
             locked=self._locked,
-            sizing_mode="stretch_both",
+            height=grid_height(rows),
+            sizing_mode="stretch_width",
             css_classes=["scene-grid"],
             stylesheets=[GRID_CSS],
         )
