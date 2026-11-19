@@ -200,6 +200,8 @@ def test_the_header_has_brand_scene_and_user(tmp_path) -> None:
     shell.create_figure(0, 0)
 
     text = shell.header.object
+    assert "display:grid" in text
+    assert "grid-template-columns:1fr auto 1fr" in text
     assert "td-header-left" in text
     assert "Transducer dashboard" in text
     assert "td-header-center" in text

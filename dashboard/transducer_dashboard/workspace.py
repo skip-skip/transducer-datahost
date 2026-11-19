@@ -49,32 +49,6 @@ DRAWER_WIDTH = 340
 
 SHELL_CSS = """
 .td-shell { background: #f5f6f8; }
-.td-header {
-  display: grid;
-  grid-template-columns: 1fr auto 1fr;
-  align-items: center;
-  gap: 1rem;
-  background: #fff;
-  border-bottom: 1px solid #d8dde6;
-  padding: 0.65rem 1rem;
-}
-.td-header-left { justify-self: start; }
-.td-header-center {
-  justify-self: center;
-  min-width: 0;
-  max-width: 60vw;
-  text-align: center;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.td-header-right {
-  justify-self: end;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-}
-.td-header-right form { margin: 0; }
 .td-rail { background: #fff; }
 .td-rail-card { border: 0; }
 .td-canvas { background: #fff; padding: 1rem 1.25rem; }
@@ -90,6 +64,22 @@ SHELL_CSS = """
 .td-status-error { color: #a11616; }
 .td-scene-button { text-align: left; }
 """
+
+# The header is an HTML pane, whose content lives in its own shadow root, so
+# shell stylesheets do not reach it. Inline styles keep it one banner row.
+HEADER_GRID_STYLE = (
+    "display:grid;grid-template-columns:1fr auto 1fr;align-items:center;"
+    "gap:1rem;background:#fff;border-bottom:1px solid #d8dde6;"
+    "padding:0.65rem 1rem;"
+)
+HEADER_CENTER_STYLE = (
+    "justify-self:center;min-width:0;max-width:60vw;text-align:center;"
+    "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;"
+)
+HEADER_RIGHT_STYLE = (
+    "justify-self:end;display:flex;align-items:center;gap:0.75rem;"
+)
+MUTED_STYLE = "color:#5b6472;"
 
 RAIL_CSS = """
 :host {
@@ -801,23 +791,28 @@ class DashboardShell:
             else None
         )
         if scene is None:
-            summary = '<span class="td-muted">No scene selected</span>'
+            summary = (
+                f'<span class="td-muted" style="{MUTED_STYLE}">'
+                "No scene selected</span>"
+            )
         else:
             count = len(scene["figures"])
             summary = (
                 f"<strong>{html.escape(scene['name'])}</strong> "
-                f'<span class="td-muted">· {count} '
+                f'<span class="td-muted" style="{MUTED_STYLE}">· {count} '
                 f'figure{"s" if count != 1 else ""}</span>'
             )
         self.header = pn.pane.HTML(
-            '<div class="td-header">'
-            '<div class="td-header-left">'
+            f'<div class="td-header" style="{HEADER_GRID_STYLE}">'
+            '<div class="td-header-left" style="justify-self:start">'
             "<strong>Transducer dashboard</strong>"
             "</div>"
-            f'<div class="td-header-center">{summary}</div>'
-            '<div class="td-header-right">'
-            f'<span class="td-muted">Signed in as {label}</span>'
-            '<form method="post" action="logout">'
+            f'<div class="td-header-center" style="{HEADER_CENTER_STYLE}">'
+            f"{summary}</div>"
+            f'<div class="td-header-right" style="{HEADER_RIGHT_STYLE}">'
+            f'<span class="td-muted" style="{MUTED_STYLE}">'
+            f"Signed in as {label}</span>"
+            '<form method="post" action="logout" style="margin:0">'
             '<button type="submit">Sign out</button></form>'
             "</div>"
             "</div>",
